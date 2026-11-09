@@ -1,0 +1,6 @@
+{
+  "name": "Nusuk Key Hub — Umrah Challenge Community",
+  "description": "Independent community-driven Nusuk Umrah Challenge referral key sharing hub with live board, copy counters, duplicate protection, and safety guidelines.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
