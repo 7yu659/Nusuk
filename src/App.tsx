@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AppStats, CodeSort, NusukCode } from './types';
-import { fetchCodes, fetchStats, recordCopy, fetchAppSettings } from './lib/api';
+import { fetchCodes, fetchStats, recordCopy, fetchAppSettings, FALLBACK_CODES } from './lib/api';
 import { normalizeLiveTimestamps } from './lib/liveSync';
 import { Header } from './components/Header';
 import { StatsBar } from './components/StatsBar';
@@ -8,6 +8,7 @@ import { PinnedCard } from './components/PinnedCard';
 import { LiveBoard } from './components/LiveBoard';
 import { NusukQuizFooter } from './components/NusukQuizFooter';
 import { ShareCodeModal } from './components/ShareCodeModal';
+import { ShareAppModal } from './components/ShareAppModal';
 import { NusukAppGuideModal } from './components/NusukAppGuideModal';
 import { InfoModal } from './components/InfoModals';
 import { AdminModal } from './components/AdminModal';
@@ -19,28 +20,19 @@ export default function App() {
     return saved !== 'light';
   });
 
-  // Stats & Codes State (Instant local cache for 0ms initial load)
+  // Stats & Codes State (Instant authentic seed cache for 0ms initial load & guaranteed initial 10 codes)
   const [stats, setStats] = useState<AppStats | null>(null);
   const [codes, setCodes] = useState<NusukCode[]>(() => {
     try {
       const saved = localStorage.getItem('nusuk_codes_cache');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length >= 10) return parsed;
       }
     } catch {}
-    return [];
+    return FALLBACK_CODES;
   });
-  const [isLoading, setIsLoading] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('nusuk_codes_cache');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return false;
-      }
-    } catch {}
-    return true;
-  });
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Custom Admin Controls State
@@ -98,6 +90,7 @@ export default function App() {
 
   // Modals
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isShareAppModalOpen, setIsShareAppModalOpen] = useState(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isNusukGuideOpen, setIsNusukGuideOpen] = useState(false);
   const [selectedCodeForGuide, setSelectedCodeForGuide] = useState<string | null>(null);
@@ -409,18 +402,9 @@ export default function App() {
     loadData();
   };
 
-  // Handle App Share
+  // Handle App Share (Opens dedicated share dialog with guaranteed clickable URL)
   const handleShareApp = () => {
-    if (navigator.share) {
-      navigator.share({
-        title: 'নুসুক কি ও রেফারেল কোড হাব',
-        text: 'নুসুক উমরাহ চ্যালেঞ্জ রেফারেল কোড লাইভ বোর্ড',
-        url: window.location.href,
-      }).catch(() => {});
-    } else {
-      navigator.clipboard.writeText(window.location.href);
-      triggerToast('ওয়েবসাইট লিঙ্ক কপি হয়েছে!', 'বন্ধুদের সাথে শেয়ার করুন');
-    }
+    setIsShareAppModalOpen(true);
   };
 
   // Custom Admin Handlers
@@ -541,6 +525,13 @@ export default function App() {
         onClose={() => setIsShareModalOpen(false)}
         language="bn"
         onSuccess={handleCodeSubmitted}
+        onToast={triggerToast}
+      />
+
+      {/* Share Live Board Modal */}
+      <ShareAppModal
+        isOpen={isShareAppModalOpen}
+        onClose={() => setIsShareAppModalOpen(false)}
         onToast={triggerToast}
       />
 

@@ -74,7 +74,7 @@ export class LocalJsonAdapter implements IDatabaseAdapter {
         }
       }
     } catch {}
-    return 'admin2026';
+    return 'Ab424311';
   }
 
   async setAdminPasscode(passcode: string): Promise<boolean> {

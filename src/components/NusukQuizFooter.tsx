@@ -16,7 +16,10 @@ import {
   ArrowRight,
   Flame,
   KeyRound,
-  FileText
+  FileText,
+  Share2,
+  Copy,
+  Check
 } from 'lucide-react';
 
 interface QuestionSample {
@@ -139,6 +142,7 @@ export const NusukQuizFooter: React.FC = () => {
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
   const [activeCategoryTab, setActiveCategoryTab] = useState<number>(0);
   const [revealedAnswers, setRevealedAnswers] = useState<Record<number, boolean>>({});
+  const [copiedFooterShare, setCopiedFooterShare] = useState(false);
 
   const toggleAnswer = (id: number) => {
     setRevealedAnswers((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -609,7 +613,40 @@ export const NusukQuizFooter: React.FC = () => {
         {/* SECTION 9: OFFICIAL LINKS & COMMUNITY DISCLAIMER */}
         {/* ========================================================= */}
         <div className="rounded-2xl bg-white dark:bg-[#1c1e24] border border-slate-200/90 dark:border-[#2b2f3b] p-5 space-y-4 shadow-xs text-xs">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
+          {/* Guaranteed Clickable Live Board Share Card */}
+          <div className="p-4 rounded-2xl bg-blue-50/80 dark:bg-[#151a24] border border-blue-200/80 dark:border-blue-900/50 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
+            <div className="space-y-1 text-center sm:text-left">
+              <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center justify-center sm:justify-start gap-1.5">
+                <Share2 className="w-4 h-4 text-[#0070e0] dark:text-sky-400" />
+                <span>নুসুক উমরাহ চ্যালেঞ্জ রেফারেল কোড লাইভ বোর্ড</span>
+              </div>
+              <div className="font-mono text-xs font-semibold text-blue-700 dark:text-sky-400 select-all">
+                https://quiz.nusuk.unlimited-key.fynex.site/
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText('নুসুক উমরাহ চ্যালেঞ্জ রেফারেল কোড লাইভ বোর্ড\nhttps://quiz.nusuk.unlimited-key.fynex.site/');
+                setCopiedFooterShare(true);
+                setTimeout(() => setCopiedFooterShare(false), 2400);
+              }}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold bg-[#0070e0] hover:bg-[#0060c0] text-white flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer shrink-0"
+            >
+              {copiedFooterShare ? (
+                <>
+                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                  <span>ক্লিকযোগ্য লিঙ্ক কপি হয়েছে!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>ক্লিকযোগ্য লিঙ্ক কপি করুন</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 flex-wrap border-t border-slate-100 dark:border-[#262934] pt-3">
             <div className="flex items-center gap-2">
               <Globe2 className="w-4 h-4 text-[#0070e0]" />
               <span className="font-bold text-slate-900 dark:text-white">প্রয়োজনীয় অফিসিয়াল লিঙ্কসমূহ:</span>

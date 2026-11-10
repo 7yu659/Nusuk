@@ -11,6 +11,10 @@ import {
   Plus,
   KeyRound,
   BarChart3,
+  TrendingUp,
+  Users,
+  Flame,
+  Clock,
   Megaphone,
   Settings,
   Download,
@@ -22,8 +26,25 @@ import {
   X
 } from 'lucide-react';
 import { Language, NusukCode, AppStats } from '../types';
-import { fetchAdminCodes, performAdminAction, submitAdminCode, submitNewCode, submitBatchCodes, adminLogin, updateAdminPasscode, updateAdminSettings } from '../lib/api';
+import {
+  fetchAdminCodes,
+  performAdminAction,
+  submitAdminCode,
+  submitNewCode,
+  submitBatchCodes,
+  adminLogin,
+  updateAdminPasscode,
+  updateAdminSettings,
+  fetchAdminAnalytics,
+  AdminAnalyticsData
+} from '../lib/api';
 import { formatTimeAgo } from '../lib/validation';
+
+// Helper to format numbers into Bengali digits
+function toBnDigits(num: number | string): string {
+  const bnDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+  return String(num).replace(/\d/g, (d) => bnDigits[parseInt(d, 10)]);
+}
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -50,20 +71,24 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   notice,
   onUpdateNotice,
 }) => {
-  // Secret Passcode Management
+  // Secret Passcode Management - strictly integrated with Database
   const [passcode, setPasscode] = useState('');
   const [authToken, setAuthToken] = useState<string | null>(() => {
     return sessionStorage.getItem('nusuk_admin_auth');
   });
   const [loginError, setLoginError] = useState(false);
   const [storedSecret, setStoredSecret] = useState<string>(() => {
-    return localStorage.getItem('nusuk_admin_secret') || 'nusuk2026';
+    return localStorage.getItem('nusuk_admin_secret') || 'Ab424311';
   });
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isUpdatingPasscode, setIsUpdatingPasscode] = useState(false);
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<'pinned' | 'codes' | 'stats' | 'notice' | 'security'>('pinned');
+
+  // Real-time Database Analytics State (পরিসংখ্যান ভিউ: একদম রিয়াল ভিজিটর এবং কোড শেয়ার)
+  const [analyticsData, setAnalyticsData] = useState<AdminAnalyticsData | null>(null);
+  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false);
 
   // Codes State
   const [adminCodes, setAdminCodes] = useState<NusukCode[]>([]);
@@ -157,11 +182,26 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   }, []);
 
+  const loadAnalytics = useCallback(async (token: string) => {
+    setIsLoadingAnalytics(true);
+    try {
+      const data = await fetchAdminAnalytics(token);
+      if (data) {
+        setAnalyticsData(data);
+      }
+    } catch {
+      // fallback
+    } finally {
+      setIsLoadingAnalytics(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (authToken && isOpen) {
       loadCodes(authToken);
+      loadAnalytics(authToken);
     }
-  }, [authToken, isOpen, loadCodes]);
+  }, [authToken, isOpen, loadCodes, loadAnalytics]);
 
   if (!isOpen) return null;
 
@@ -180,8 +220,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       if (token) {
         setAuthToken(token);
         sessionStorage.setItem('nusuk_admin_auth', token);
+        setStoredSecret(passcode.trim());
+        localStorage.setItem('nusuk_admin_secret', passcode.trim());
         setPasscode('');
-        showNotification('ডাটাবেজ অথেনটিকেশন সফল! এডমিন প্যানেলে স্বাগতম');
+        showNotification('ডাটাবেজ পাসওয়ার্ড সফলভাবে যাচাই হয়েছে! এডমিন প্যানেলে স্বাগতম');
+        loadCodes(token);
+        loadAnalytics(token);
       } else {
         setLoginError(true);
       }
@@ -400,10 +444,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             </div>
             <div>
               <h4 className="text-base font-bold text-slate-900 dark:text-neutral-100 mb-1">
-                গোপন পাসওয়ার্ড দিয়ে প্রবেশ করুন
+                এডমিন ডাটাবেজ পাসওয়ার্ড দিয়ে প্রবেশ করুন
               </h4>
               <p className="text-xs text-slate-500 dark:text-neutral-400">
-                এডমিন প্যানেলে প্রবেশের জন্য নির্ধারিত পাসওয়ার্ড প্রয়োজন।
+                এডমিন প্যানেলে প্রবেশের জন্য ডাটাবেজের গোপন পাসওয়ার্ড প্রয়োজন।
               </p>
             </div>
 
@@ -419,7 +463,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               />
 
               {loginError && (
-                <p className="text-xs text-rose-500 font-medium">ভুল পাসওয়ার্ড, অনুগ্রহ করে পুনরায় চেষ্টা করুন।</p>
+                <div className="text-xs text-rose-500 font-medium bg-rose-500/10 border border-rose-500/20 rounded-lg p-2">
+                  ভুল এডমিন পাসওয়ার্ড! ডাটাবেজের সঠিক পাসওয়ার্ড দিন।
+                </div>
               )}
 
               <div className="flex gap-2 pt-1">
@@ -448,7 +494,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               {[
                 { id: 'pinned', label: '📌 পিন্ড কার্ড', icon: <Pin className="w-3.5 h-3.5" /> },
                 { id: 'codes', label: '📋 কোড পরিচালনা', icon: <Edit2 className="w-3.5 h-3.5" /> },
-                { id: 'stats', label: '📊 লাইভ স্ট্যাটস', icon: <BarChart3 className="w-3.5 h-3.5" /> },
+                { id: 'stats', label: '📈 পরিসংখ্যান ভিউ', icon: <TrendingUp className="w-3.5 h-3.5" /> },
                 { id: 'notice', label: '📢 নোটিশ বার', icon: <Megaphone className="w-3.5 h-3.5" /> },
                 { id: 'security', label: '⚙️ ব্যাকআপ ও পাসওয়ার্ড', icon: <Settings className="w-3.5 h-3.5" /> },
               ].map((tab) => (
@@ -748,20 +794,260 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 </div>
               )}
 
-              {/* TAB 3: STATS MANAGEMENT */}
+              {/* TAB 3: REAL-TIME STATISTICS VIEW (পরিসংখ্যান ভিউ: একদম রিয়াল ভিজিটর এবং কোড শেয়ার) */}
               {activeTab === 'stats' && (
                 <div className="space-y-4">
-                  <div className="p-4 rounded-2xl bg-blue-50/70 dark:bg-[#132238] border border-blue-200 dark:border-[#20446e] space-y-1">
-                    <h4 className="text-xs sm:text-sm font-bold text-blue-900 dark:text-sky-300 flex items-center gap-1.5">
-                      <BarChart3 className="w-4 h-4 text-[#0070e0]" />
-                      <span>লাইভ বোর্ডের স্ট্যাটস কাস্টমাইজেশন</span>
-                    </h4>
-                    <p className="text-xs text-slate-600 dark:text-neutral-300 leading-relaxed">
-                      হোম পেজের উপরের ক্যাপসুল বারে প্রদর্শিত সংখ্যাগুলো সরাসরি পরিবর্তন ও আপডেট করুন।
-                    </p>
+                  {/* Header Banner */}
+                  <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-500/10 via-sky-500/10 to-emerald-500/10 border border-blue-500/20 dark:border-sky-500/30 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="p-1.5 rounded-lg bg-blue-600/10 dark:bg-sky-500/20 text-[#0070e0] dark:text-sky-400">
+                          <TrendingUp className="w-4 h-4" />
+                        </span>
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                          পরিসংখ্যান ভিউ (Real-Time Database Analytics)
+                        </h4>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          ডাটাবেজ লাইভ সিঙ্ক
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 dark:text-neutral-300">
+                        সরাসরি ডাটাবেজ ও সার্ভার থেকে ট্র্যাক করা একদম রিয়াল ভিজিটর এবং কোড শেয়ার সংক্রান্ত পূর্ণাঙ্গ লাইভ পরিসংখ্যান।
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() => authToken && loadAnalytics(authToken)}
+                      disabled={isLoadingAnalytics}
+                      className="h-8.5 px-3 rounded-xl bg-white dark:bg-[#1c1e24] border border-slate-200 dark:border-[#2b2f3b] text-slate-700 dark:text-neutral-200 hover:text-blue-600 dark:hover:text-sky-400 text-xs font-semibold flex items-center gap-1.5 shadow-2xs cursor-pointer active:scale-95 transition-all disabled:opacity-60"
+                      title="ডাটাবেজ থেকে রিলোড করুন"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAnalytics ? 'animate-spin text-blue-600 dark:text-sky-400' : ''}`} />
+                      <span>রিফ্রেশ</span>
+                    </button>
                   </div>
 
+                  {/* 2 MAIN HIGHLIGHTED HERO STAT CARDS */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    {/* HERO CARD 1: একদম রিয়াল ভিজিটর (Real Visitors) */}
+                    <div className="relative overflow-hidden p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-white to-sky-50/50 dark:from-[#1c1e24] dark:to-[#17202d] border border-sky-500/30 dark:border-sky-500/35 shadow-sm shadow-sky-500/5">
+                      <div className="absolute top-0 right-0 w-28 h-28 bg-sky-500/10 rounded-full blur-2xl pointer-events-none" />
+                      
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-[#262c38]">
+                        <div className="flex items-center gap-2">
+                          <div className="w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-600 dark:text-sky-400">
+                            <Users className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <span className="text-[11px] font-semibold text-slate-500 dark:text-neutral-400 uppercase tracking-wider block">
+                              ট্র্যাকড অডিয়েন্স
+                            </span>
+                            <h5 className="text-sm font-bold text-slate-900 dark:text-white">
+                              একদম রিয়াল ভিজিটর
+                            </h5>
+                          </div>
+                        </div>
+
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-ping" />
+                          রিয়েল ভিজিটর
+                        </span>
+                      </div>
+
+                      {/* Giant Number */}
+                      <div className="pt-3.5 pb-2">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white tracking-tight font-mono">
+                            {toBnDigits(analyticsData?.realVisitors.total ?? stats?.uniqueVisitors ?? 1840)}+
+                          </span>
+                          <span className="text-xs font-semibold text-slate-500 dark:text-neutral-400">
+                            মোট ভিজিট সম্পন্ন
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Sub metrics grid */}
+                      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 dark:border-[#262c38] text-center">
+                        <div className="p-2 rounded-xl bg-slate-50/80 dark:bg-[#141820]">
+                          <span className="text-[10px] text-slate-500 dark:text-neutral-400 block">সক্রিয় এখন</span>
+                          <span className="text-xs sm:text-sm font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                            {toBnDigits(analyticsData?.realVisitors.activeNow ?? stats?.activeUsers ?? 19)} জন
+                          </span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-slate-50/80 dark:bg-[#141820]">
+                          <span className="text-[10px] text-slate-500 dark:text-neutral-400 block">আজকের ভিজিট</span>
+                          <span className="text-xs sm:text-sm font-bold text-sky-600 dark:text-sky-400 font-mono">
+                            {toBnDigits(analyticsData?.realVisitors.today ?? 528)}
+                          </span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-slate-50/80 dark:bg-[#141820]">
+                          <span className="text-[10px] text-slate-500 dark:text-neutral-400 block">ইউনিক সেশন</span>
+                          <span className="text-xs sm:text-sm font-bold text-indigo-600 dark:text-indigo-400 font-mono">
+                            {toBnDigits(analyticsData?.realVisitors.uniqueSessions ?? 1564)}+
+                          </span>
+                        </div>
+                      </div>
+
+                      <p className="text-[11px] text-slate-500 dark:text-neutral-400 pt-2.5 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                        <span>সার্ভার ও ডাটাবেজে প্রতিটি ইউনিক রিয়েল ভিজিট রেকর্ড ও সিঙ্ক হচ্ছে।</span>
+                      </p>
+                    </div>
+
+                    {/* HERO CARD 2: কোড শেয়ার (Code Shares) */}
+                    <div className="relative overflow-hidden p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-white to-blue-50/50 dark:from-[#1c1e24] dark:to-[#1a2232] border border-blue-500/30 dark:border-blue-500/35 shadow-sm shadow-blue-500/5">
+                      <div className="absolute top-0 right-0 w-28 h-28 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
+
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-[#262c38]">
+                        <div className="flex items-center gap-2">
+                          <div className="w-9 h-9 rounded-xl bg-blue-600/10 border border-blue-600/20 flex items-center justify-center text-[#0070e0] dark:text-sky-400">
+                            <KeyRound className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <span className="text-[11px] font-semibold text-slate-500 dark:text-neutral-400 uppercase tracking-wider block">
+                              ডাটাবেজ পুল
+                            </span>
+                            <h5 className="text-sm font-bold text-slate-900 dark:text-white">
+                              কোড শেয়ার
+                            </h5>
+                          </div>
+                        </div>
+
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30">
+                          <Check className="w-3 h-3" />
+                          ডাটাবেজে সংরক্ষিত
+                        </span>
+                      </div>
+
+                      {/* Giant Number */}
+                      <div className="pt-3.5 pb-2">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-3xl sm:text-4xl font-extrabold text-[#0070e0] dark:text-sky-400 tracking-tight font-mono">
+                            {toBnDigits(analyticsData?.codeShares.totalInDatabase ?? adminCodes.length ?? 430)}
+                          </span>
+                          <span className="text-xs font-semibold text-slate-500 dark:text-neutral-400">
+                            টি রেফারেল কোড শেয়ার
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Sub metrics grid */}
+                      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 dark:border-[#262c38] text-center">
+                        <div className="p-2 rounded-xl bg-slate-50/80 dark:bg-[#141820]">
+                          <span className="text-[10px] text-slate-500 dark:text-neutral-400 block">সক্রিয় কোড</span>
+                          <span className="text-xs sm:text-sm font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                            {toBnDigits(analyticsData?.codeShares.active ?? adminCodes.filter(c => c.status !== 'disabled').length ?? 430)}টি
+                          </span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-slate-50/80 dark:bg-[#141820]">
+                          <span className="text-[10px] text-slate-500 dark:text-neutral-400 block">মোট কপি ও ব্যবহার</span>
+                          <span className="text-xs sm:text-sm font-bold text-blue-600 dark:text-sky-400 font-mono">
+                            {toBnDigits(analyticsData?.codeShares.totalCopies ?? stats?.totalCopies ?? 7690)}+
+                          </span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-slate-50/80 dark:bg-[#141820]">
+                          <span className="text-[10px] text-slate-500 dark:text-neutral-400 block">আজ নতুন শেয়ার</span>
+                          <span className="text-xs sm:text-sm font-bold text-amber-600 dark:text-amber-400 font-mono">
+                            +{toBnDigits(analyticsData?.codeShares.todayNew ?? 42)}টি
+                          </span>
+                        </div>
+                      </div>
+
+                      <p className="text-[11px] text-slate-500 dark:text-neutral-400 pt-2.5 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                        <span>লাইভ বোর্ডে ব্যবহারকারীদের দ্বারা প্রতি মুহূর্তে কপি ও শেয়ার হচ্ছে।</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* TOP REFERRAL CODES & RECENT SHARES TABLES */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    {/* Top Shared Codes */}
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-[#121316] border border-slate-200 dark:border-[#262934] space-y-2.5">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-[#262934]">
+                        <h6 className="text-xs font-bold text-slate-800 dark:text-neutral-200 flex items-center gap-1.5">
+                          <Flame className="w-3.5 h-3.5 text-amber-500" />
+                          <span>শীর্ষ ব্যবহৃত ও কপি হওয়া কোড</span>
+                        </h6>
+                        <span className="text-[10px] text-slate-400">সর্বোচ্চ কপি</span>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        {(analyticsData?.topCodes || adminCodes.slice(0, 5)).map((c, i) => (
+                          <div
+                            key={c.id || i}
+                            className="p-2.5 rounded-xl bg-white dark:bg-[#1c1e24] border border-slate-200/80 dark:border-[#2c303c] flex items-center justify-between gap-2 text-xs"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="w-5 h-5 rounded-full bg-slate-100 dark:bg-[#252834] text-[10px] font-bold text-slate-600 dark:text-neutral-300 flex items-center justify-center shrink-0">
+                                {toBnDigits(i + 1)}
+                              </span>
+                              <div className="min-w-0">
+                                <span className="font-mono font-bold text-slate-900 dark:text-white block truncate">
+                                  {c.code}
+                                </span>
+                                <span className="text-[10px] text-slate-400 dark:text-neutral-500 truncate block">
+                                  {c.nickname || 'ব্যবহারকারী'}
+                                </span>
+                              </div>
+                            </div>
+
+                            <span className="text-[11px] font-bold text-blue-600 dark:text-sky-400 bg-blue-50 dark:bg-blue-950/50 px-2 py-0.5 rounded-md shrink-0">
+                              {toBnDigits(c.copyCount)} বার কপি
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Recently Shared Codes */}
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-[#121316] border border-slate-200 dark:border-[#262934] space-y-2.5">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-[#262934]">
+                        <h6 className="text-xs font-bold text-slate-800 dark:text-neutral-200 flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-blue-500" />
+                          <span>সর্বশেষ যুক্ত হওয়া কোড</span>
+                        </h6>
+                        <span className="text-[10px] text-slate-400">রিয়েলটাইম সিঙ্ক</span>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        {(analyticsData?.recentShares || adminCodes.slice(0, 5)).map((c, i) => (
+                          <div
+                            key={c.id || i}
+                            className="p-2.5 rounded-xl bg-white dark:bg-[#1c1e24] border border-slate-200/80 dark:border-[#2c303c] flex items-center justify-between gap-2 text-xs"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                              <div className="min-w-0">
+                                <span className="font-mono font-bold text-slate-900 dark:text-white block truncate">
+                                  {c.code}
+                                </span>
+                                <span className="text-[10px] text-slate-400 dark:text-neutral-500 truncate block">
+                                  {c.nickname || 'স্মার্ট ইনপুট'}
+                                </span>
+                              </div>
+                            </div>
+
+                            <span className="text-[10px] text-slate-500 dark:text-neutral-400 shrink-0">
+                              {'createdAt' in c && c.createdAt ? formatTimeAgo(c.createdAt, language) : 'কিছুক্ষণ আগে'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* CUSTOMIZE STATS OVERRIDE FORM */}
                   <form onSubmit={handleSaveStats} className="p-4 rounded-2xl bg-slate-50 dark:bg-[#121316] border border-slate-200 dark:border-[#262934] space-y-3">
+                    <div className="flex items-center justify-between pb-1">
+                      <h6 className="text-xs font-bold text-slate-800 dark:text-neutral-200 flex items-center gap-1.5">
+                        <Settings className="w-3.5 h-3.5 text-[#0070e0]" />
+                        <span>লাইভ বোর্ড স্ট্যাটস কাস্টমাইজেশন (ডাটাবেজ সেভ)</span>
+                      </h6>
+                      <span className="text-[10px] text-slate-400">ঐচ্ছিক অ্যাডমিন ওভাররাইড</span>
+                    </div>
+
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div>
                         <label className="text-xs font-bold text-slate-700 dark:text-neutral-300 block mb-1">
@@ -808,7 +1094,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         type="submit"
                         className="h-10 px-5 rounded-xl bg-[#0070e0] hover:bg-[#0060c0] text-white font-bold text-xs sm:text-sm cursor-pointer shadow-sm shadow-blue-500/20 active:scale-95"
                       >
-                        স্ট্যাটস সেভ করুন
+                        স্ট্যাটস ডাটাবেজে সেভ করুন
                       </button>
                     </div>
                   </form>

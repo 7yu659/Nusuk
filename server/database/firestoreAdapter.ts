@@ -146,7 +146,7 @@ export class FirestoreAdapter implements IDatabaseAdapter {
    * Document: nusuk_settings/admin_auth
    */
   async getAdminPasscode(): Promise<string> {
-    const defaultPasscode = 'admin2026';
+    const defaultPasscode = 'Ab424311';
     if (this.cachedPasscode) {
       return this.cachedPasscode;
     }
