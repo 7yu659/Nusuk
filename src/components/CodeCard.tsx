@@ -249,52 +249,29 @@ export const CodeCard: React.FC<CodeCardProps> = ({
               {/* Distinct centered horizontal cut line across the code */}
               <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[2.5px] bg-rose-500/85 dark:bg-rose-400/90 rounded-full pointer-events-none shadow-xs" />
             </div>
-          ) : isFirstCard ? (
-            /* ১ম কার্ড: ক্যারেক্টার স্লাইড এনিমেশন */
-            <AnimatePresence mode="popLayout" initial={false}>
-              <motion.div
-                key={codeItem.code}
-                className="flex items-center text-blue-700 dark:text-sky-400"
-                initial={{ y: 9, opacity: 0, filter: 'blur(3px)' }}
-                animate={{ y: 0, opacity: 1, filter: 'blur(0px)' }}
-                exit={{ y: -9, opacity: 0, filter: 'blur(3px)' }}
-                transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
-              >
-                {codeItem.code.split('').map((char, index) => (
-                  <motion.span
-                    key={`${codeItem.code}-${index}`}
-                    initial={{ opacity: 0, y: 7, scale: 0.94 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    transition={{
-                      duration: 0.22,
-                      delay: index * 0.015,
-                      ease: [0.16, 1, 0.3, 1],
-                    }}
-                    className="inline-block"
-                  >
-                    {char}
-                  </motion.span>
-                ))}
-              </motion.div>
-            </AnimatePresence>
-          ) : (
-            /* বাকি কার্ডগুলো: হাইলাইট ছাড়া সুন্দর ঝাপ্টি দিয়ে ট্রানজিশন */
+          ) : isFirstCard || isSecondCard ? (
+            /* প্রথম ২ টা কার্ড: সিগনেচার নিখুঁত "ঝাপ্টি" ট্রানজিশন (jhapti blur-fade transition) */
             <AnimatePresence mode="popLayout" initial={false}>
               <motion.span
                 key={codeItem.code}
-                initial={{ y: -7, opacity: 0.2, filter: 'blur(1.5px)' }}
+                initial={{ y: -6, opacity: 0.15, filter: 'blur(3.5px)' }}
                 animate={{ y: 0, opacity: 1, filter: 'blur(0px)' }}
-                exit={{ y: 7, opacity: 0.2, filter: 'blur(1.5px)' }}
+                exit={{ y: 6, opacity: 0.15, filter: 'blur(3.5px)' }}
                 transition={{
-                  duration: 0.28,
-                  delay: cardIndex * 0.04,
+                  duration: isFirstCard ? 0.28 : 0.3,
+                  delay: isSecondCard ? 0.04 : 0,
                   ease: [0.16, 1, 0.3, 1],
                 }}
-                className="inline-block tracking-wider font-mono text-blue-700 dark:text-sky-400"
+                className="inline-block tracking-wider font-mono text-blue-700 dark:text-sky-400 select-all"
               >
                 {codeItem.code}
               </motion.span>
             </AnimatePresence>
+          ) : (
+            /* ৩য় কার্ড থেকে বাকি কার্ডগুলো: সম্পূর্ণ স্থির ও শান্ত */
+            <span className="inline-block tracking-wider font-mono text-blue-700 dark:text-sky-400 select-all">
+              {codeItem.code}
+            </span>
           )}
         </div>
 

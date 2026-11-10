@@ -192,12 +192,17 @@ export const LiveBoard: React.FC<LiveBoardProps> = ({
   }, [deduplicatedCodes, visibleCount]);
 
   const hasMore = visibleCount < deduplicatedCodes.length;
+  const [isLoadingNext, setIsLoadingNext] = useState(false);
 
   const loadNext10 = useCallback(() => {
-    setVisibleCount((prev) => {
-      if (prev >= deduplicatedCodes.length) return prev;
-      return Math.min(prev + 10, deduplicatedCodes.length);
-    });
+    setIsLoadingNext(true);
+    setTimeout(() => {
+      setVisibleCount((prev) => {
+        if (prev >= deduplicatedCodes.length) return prev;
+        return Math.min(prev + 10, deduplicatedCodes.length);
+      });
+      setIsLoadingNext(false);
+    }, 120);
   }, [deduplicatedCodes.length]);
 
 
@@ -258,15 +263,15 @@ export const LiveBoard: React.FC<LiveBoardProps> = ({
           </button>
         </div>
 
-        {/* Row 2: কিভাবে সহজে বিজয় হব? (প্রিমিয়াম ট্রান্সপারেন্ট লাল বাটন) & নতুন আগে ▾ */}
+        {/* Row 2: কিভাবে সহজে বিজয় হব? (প্রিমিয়াম স্বচ্ছ/ট্রান্সপারেন্ট লাল বাটন) & নতুন আগে ▾ */}
         <div className="flex items-center gap-2 pt-2.5">
-          {/* Button 1: 🏆 কিভাবে সহজে বিজয় হব? (প্রিমিয়াম ট্রান্সপারেন্ট লাল বাটন - Premium Transparent Red Button) */}
+          {/* Button 1: 🏆 কিভাবে সহজে বিজয় হব? (প্রিমিয়াম ট্রান্সপারেন্ট লাল বাটন) */}
           <button
             onClick={handleScrollToFooterGuide}
             title="নুসুক উমরাহ চ্যালেঞ্জে সহজে বিজয় হওয়ার পূর্ণাঙ্গ গাইড ও প্রশ্নোত্তর"
-            className="flex-1 min-w-0 h-8 sm:h-8.5 px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 active:bg-rose-500/30 dark:bg-rose-500/15 dark:hover:bg-rose-500/25 border border-rose-500/30 dark:border-rose-400/40 text-rose-600 dark:text-rose-400 text-[11px] sm:text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap transition-all cursor-pointer active:scale-95 shadow-xs backdrop-blur-xs"
+            className="flex-1 min-w-0 h-8 sm:h-8.5 px-3 rounded-xl bg-rose-500/[0.08] hover:bg-rose-500/[0.16] active:bg-rose-500/[0.24] dark:bg-rose-500/[0.12] dark:hover:bg-rose-500/[0.22] border border-rose-500/30 dark:border-rose-400/35 text-rose-600 dark:text-rose-400 text-[11px] sm:text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap transition-all cursor-pointer active:scale-95 shadow-xs shadow-rose-500/5 hover:shadow-rose-500/15 backdrop-blur-md"
           >
-            <Trophy className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 fill-amber-400/20 shrink-0" />
+            <Trophy className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 fill-amber-400/25 shrink-0" />
             <span className="truncate sm:overflow-visible">কিভাবে সহজে বিজয় হব?</span>
           </button>
 
@@ -368,13 +373,23 @@ export const LiveBoard: React.FC<LiveBoardProps> = ({
 
       {/* 3. Load Next 10 Codes Button */}
       {hasMore && (
-        <div className="pt-3 pb-2 flex flex-col items-center justify-center">
+        <div className="pt-3.5 pb-2 flex flex-col items-center justify-center">
           <button
             onClick={loadNext10}
-            className="w-full sm:w-auto min-w-[280px] px-6 py-3 rounded-2xl text-xs sm:text-[13px] font-bold text-slate-800 dark:text-neutral-100 bg-white hover:bg-slate-50 dark:bg-[#1c1e24] dark:hover:bg-[#232630] border border-slate-200/90 dark:border-[#2b2f3b] hover:border-blue-500/40 dark:hover:border-sky-400/40 shadow-sm shadow-slate-900/5 dark:shadow-black/25 transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-2 group"
+            disabled={isLoadingNext}
+            className="w-full sm:w-auto min-w-[280px] px-6 py-3 rounded-2xl text-xs sm:text-[13px] font-bold text-slate-800 dark:text-neutral-100 bg-white hover:bg-slate-50 dark:bg-[#1c1e24] dark:hover:bg-[#232630] border border-slate-200/90 dark:border-[#2b2f3b] hover:border-blue-500/40 dark:hover:border-sky-400/40 shadow-sm shadow-slate-900/5 dark:shadow-black/25 transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-2 group disabled:opacity-85"
           >
-            <span>পরবর্তি ১০ টি কোড দেখতে ক্লিক করুন</span>
-            <ChevronDown className="w-4 h-4 text-blue-600 dark:text-sky-400 group-hover:translate-y-0.5 transition-transform shrink-0" />
+            {isLoadingNext ? (
+              <>
+                <RotateCw className="w-4 h-4 animate-spin text-blue-600 dark:text-sky-400" />
+                <span>লোড হচ্ছে...</span>
+              </>
+            ) : (
+              <>
+                <span>পরবর্তি ১০ টি কোড দেখতে ক্লিক করুন</span>
+                <ChevronDown className="w-4 h-4 text-blue-600 dark:text-sky-400 group-hover:translate-y-0.5 transition-transform shrink-0" />
+              </>
+            )}
           </button>
         </div>
       )}
