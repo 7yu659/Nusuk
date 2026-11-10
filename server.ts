@@ -207,6 +207,33 @@ const INITIAL_CODES: NusukCodeEntity[] = [
 
 let codesDatabase: NusukCodeEntity[] = [];
 let totalVisitsCounter = 1480;
+let cachedAdminPasscode = 'admin2026';
+
+export interface AppSettings {
+  pinnedCode: string;
+  notice: {
+    enabled: boolean;
+    text: string;
+  };
+  customStats?: {
+    totalCodes?: number;
+    activeUsers?: number;
+    uniqueVisitors?: number;
+  };
+}
+
+let appSettings: AppSettings = {
+  pinnedCode: 'NG-ElOBvwzz',
+  notice: {
+    enabled: false,
+    text: '📢 নতুন উমরাহ চ্যালেঞ্জ রাউন্ড শুরু হয়েছে! প্রতিদিন কুইজে অংশ নিন এবং লাইভ বোর্ডে রেফারেল কোড শেয়ার করে বোনাস কি সংগ্রহ করুন।',
+  },
+  customStats: {
+    totalCodes: 0,
+    activeUsers: 0,
+    uniqueVisitors: 0,
+  },
+};
 
 // Initialize or load database
 function loadDatabase() {
@@ -217,8 +244,25 @@ function loadDatabase() {
     if (fs.existsSync(DB_FILE)) {
       const data = fs.readFileSync(DB_FILE, 'utf-8');
       const parsed = JSON.parse(data);
+      if (typeof parsed.adminPasscode === 'string' && parsed.adminPasscode.trim()) {
+        cachedAdminPasscode = parsed.adminPasscode.trim();
+      }
+      if (parsed.appSettings) {
+        appSettings = { ...appSettings, ...parsed.appSettings };
+      }
       if (Array.isArray(parsed.codes) && parsed.codes.length > 0) {
-        codesDatabase = parsed.codes;
+        // Strictly deduplicate database codes on load so each code appears once
+        const seenNorms = new Set<string>();
+        const uniqueCodes: NusukCodeEntity[] = [];
+        for (const c of parsed.codes) {
+          if (!c || !c.code) continue;
+          const normKey = (c.normalizedCode || c.code).trim().toUpperCase();
+          if (!seenNorms.has(normKey)) {
+            seenNorms.add(normKey);
+            uniqueCodes.push(c);
+          }
+        }
+        codesDatabase = uniqueCodes;
         totalVisitsCounter = parsed.totalVisits || 1480;
 
         // If all codes are older than 10 minutes, stagger the newest ones relative to now
@@ -256,6 +300,8 @@ function saveDatabase() {
         {
           codes: codesDatabase,
           totalVisits: totalVisitsCounter,
+          adminPasscode: cachedAdminPasscode,
+          appSettings,
           lastSaved: new Date().toISOString(),
         },
         null,
@@ -278,16 +324,55 @@ async function initDatabaseEngine() {
     console.log(`[Database] Initializing ${adapter.name} integration...`);
     await adapter.init(INITIAL_CODES);
 
+    // Fetch and cache secure admin passcode directly from database (Firestore)
+    try {
+      const dbPass = await adapter.getAdminPasscode();
+      if (dbPass) {
+        cachedAdminPasscode = dbPass;
+        console.log(`[Database] Admin passcode successfully secured and loaded from database.`);
+      }
+    } catch (e) {
+      console.warn('[Database] Error fetching admin passcode from database, fallback active:', e);
+    }
+
+    // Fetch and sync app settings from database (Firestore / local)
+    try {
+      if (adapter.getSettings) {
+        const dbSettings = await adapter.getSettings();
+        if (dbSettings) {
+          appSettings = { ...appSettings, ...dbSettings };
+          console.log('[Database] App settings loaded from database.');
+        }
+      }
+    } catch (e) {
+      console.warn('[Database] Error fetching settings from database:', e);
+    }
+
     // 3. Set up single real-time snapshot listener on the server
     // This receives real-time pushes whenever new codes are added to Firestore
     // and syncs them into the Node.js memory cache, so ALL user reads are O(1) from RAM!
     if (adapter.onCodesChanged) {
       adapter.onCodesChanged((remoteCodes) => {
         if (Array.isArray(remoteCodes) && remoteCodes.length > 0) {
-          console.log(`[Database] Real-time sync: ${remoteCodes.length} codes from ${adapter.name}`);
-          // Preserve pinned codes ordering if needed
-          codesDatabase = remoteCodes;
-          saveDatabase();
+          const existingMap = new Map(codesDatabase.map((c) => [(c.normalizedCode || c.code).trim().toUpperCase(), c]));
+          let hasChanges = false;
+          for (const item of remoteCodes) {
+            if (!item || !item.code) continue;
+            const norm = (item.normalizedCode || item.code).trim().toUpperCase();
+            if (!existingMap.has(norm)) {
+              codesDatabase.unshift(item);
+              existingMap.set(norm, item);
+              hasChanges = true;
+            }
+          }
+          if (hasChanges) {
+            console.log(`[Database] Real-time sync: new codes merged into database from ${adapter.name}`);
+            saveDatabase();
+            broadcastRealtime('codes_updated', {
+              codes: codesDatabase.filter((c) => c.status !== 'disabled'),
+              stats: getLiveStats(),
+            });
+          }
         }
       });
     } else {
@@ -303,6 +388,10 @@ async function initDatabaseEngine() {
 }
 
 initDatabaseEngine();
+
+// Cooldown tracking for user code submissions: 4 minutes = 240,000ms
+export const FOUR_MINUTES_MS = 4 * 60 * 1000;
+const userLastShareMap = new Map<string, number>();
 
 // In-memory rate limiting map (IP -> timestamps array)
 const rateLimitMap = new Map<string, number[]>();
@@ -321,34 +410,239 @@ function checkRateLimit(ip: string): boolean {
   return true;
 }
 
-// REST API Endpoints
+// Robust Nusuk Referral Code Parser & Normalizer
+export function cleanNusukCode(raw: string): { code: string; normalizedCode: string } | null {
+  if (!raw || typeof raw !== 'string') return null;
+  let trimmed = raw.trim();
+  // Strip enclosing quotes, markdown, brackets, or angle brackets
+  trimmed = trimmed.replace(/^[`"'\(\[\{<]+|[`"'\)\]\}>]+$/g, '').trim();
 
-// 1. Get Live Stats
-app.get('/api/stats', (req: Request, res: Response) => {
-  totalVisitsCounter += 1;
+  // If user pasted a full Nusuk URL like https://services.nusuk.sa/app?p=27&id=NG-ElOBvwzz
+  const urlMatch = trimmed.match(/id=([A-Za-z0-9\-_]+)/i);
+  if (urlMatch && urlMatch[1]) {
+    trimmed = urlMatch[1];
+  }
+
+  // Ensure 'NG-' prefix while preserving character case of the key
+  if (trimmed.toUpperCase().startsWith('NG-')) {
+    trimmed = 'NG-' + trimmed.slice(3).trim();
+  } else if (trimmed.toUpperCase().startsWith('NG')) {
+    trimmed = 'NG-' + trimmed.slice(2).trim();
+  } else {
+    trimmed = 'NG-' + trimmed;
+  }
+
+  // Validate format: NG- followed by 6 to 14 alphanumeric characters
+  const regex = /^NG-[A-Za-z0-9]{6,14}$/;
+  if (!regex.test(trimmed)) {
+    return null;
+  }
+
+  return {
+    code: trimmed,
+    normalizedCode: trimmed.toUpperCase(),
+  };
+}
+
+// Active Server-Sent Events (SSE) clients for zero-database-read instant real-time broadcast
+const sseClients = new Set<Response>();
+
+function broadcastRealtime(event: string, data: unknown) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(payload);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
+
+function getLiveStats() {
   const activeCodes = codesDatabase.filter((c) => c.status !== 'disabled').length;
   const totalCopies = codesDatabase.reduce((acc, curr) => acc + curr.copyCount, 0);
   const reportedCodes = codesDatabase.filter((c) => (c.reportCount || 0) > 0).length;
-  
-  // Calculate today's codes
+
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   const todayCodes = codesDatabase.filter((c) => new Date(c.createdAt) >= startOfToday).length;
 
-  res.json({
-    totalCodes: codesDatabase.length,
+  const totalCodesCount = Math.max(
+    codesDatabase.length,
+    appSettings.customStats?.totalCodes && appSettings.customStats.totalCodes > 0
+      ? appSettings.customStats.totalCodes
+      : codesDatabase.length
+  );
+
+  const activeUsersCount =
+    appSettings.customStats?.activeUsers && appSettings.customStats.activeUsers > 0
+      ? appSettings.customStats.activeUsers
+      : Math.floor(18 + Math.sin(Date.now() / 60000) * 5 + (codesDatabase.length % 7));
+
+  const uniqueVisitsCount = Math.max(
+    totalVisitsCounter,
+    appSettings.customStats?.uniqueVisitors && appSettings.customStats.uniqueVisitors > 0
+      ? appSettings.customStats.uniqueVisitors
+      : totalVisitsCounter
+  );
+
+  return {
+    totalCodes: totalCodesCount,
     activeCodes,
-    activeUsers: Math.floor(18 + (Math.sin(Date.now() / 60000) * 5) + (codesDatabase.length % 7)),
-    totalCopies: totalCopies + 5240, // Base historical + live
+    activeUsers: activeUsersCount,
+    totalCopies: totalCopies + 5240,
     todayCodes: todayCodes + 24,
     reportedCodes,
-    uniqueVisitors: totalVisitsCounter,
+    uniqueVisitors: uniqueVisitsCount,
+  };
+}
+
+// REST API Endpoints
+
+// Zero-Read High-Speed Real-time SSE Stream Endpoint
+app.get('/api/realtime/stream', (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  // Send initial connected payload
+  const initial = {
+    type: 'CONNECTED',
+    stats: getLiveStats(),
+    settings: appSettings,
+    totalCodes: codesDatabase.length,
+  };
+  res.write(`event: init\ndata: ${JSON.stringify(initial)}\n\n`);
+
+  sseClients.add(res);
+
+  // Heartbeat ping every 20s to keep connection alive through proxies
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': ping\n\n');
+    } catch {
+      clearInterval(heartbeat);
+      sseClients.delete(res);
+    }
+  }, 20000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    sseClients.delete(res);
   });
 });
 
-// 2. Get Codes with Filtering, Search & Sorting
+// 1. Get Live Stats
+app.get('/api/stats', (req: Request, res: Response) => {
+  totalVisitsCounter += 1;
+  res.json(getLiveStats());
+});
+
+// Get Public App Settings (Pinned Code, Notice Bar, Stats) - Direct from Database
+app.get('/api/settings', (req: Request, res: Response) => {
+  res.json({
+    pinnedCode: appSettings.pinnedCode,
+    notice: appSettings.notice,
+    customStats: appSettings.customStats,
+    stats: getLiveStats(),
+  });
+});
+
+// Admin Save All Activities & Settings to Database (Pinned Code, Live Stats, Notice Bar)
+app.post('/api/admin/settings', async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.includes('nusuk-admin-token-2026')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const { pinnedCode, notice, customStats } = req.body;
+
+  if (pinnedCode && typeof pinnedCode === 'string') {
+    const cleaned = cleanNusukCode(pinnedCode);
+    const cleanCode = cleaned ? cleaned.code : pinnedCode.trim();
+    appSettings.pinnedCode = cleanCode;
+
+    // Update isPinned flag in codesDatabase
+    let found = false;
+    codesDatabase.forEach((c) => {
+      if (c.code === cleanCode || (cleaned && c.normalizedCode === cleaned.normalizedCode)) {
+        c.isPinned = true;
+        found = true;
+      } else {
+        c.isPinned = false;
+      }
+    });
+
+    // If pinned code doesn't exist yet, insert it as verified pinned code
+    if (!found && cleaned) {
+      const pinnedEntity: NusukCodeEntity = {
+        id: `code-pinned-${Date.now()}`,
+        code: cleaned.code,
+        normalizedCode: cleaned.normalizedCode,
+        nickname: 'কমিউনিটি পিন্ড',
+        status: 'verified',
+        copyCount: 150,
+        reportCount: 0,
+        isPinned: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        reports: [],
+      };
+      codesDatabase.unshift(pinnedEntity);
+      dbManager.getAdapter().addCode(pinnedEntity).catch(() => {});
+    }
+  }
+
+  if (notice && typeof notice === 'object') {
+    appSettings.notice = {
+      enabled: Boolean(notice.enabled),
+      text: typeof notice.text === 'string' ? notice.text.trim() : appSettings.notice.text,
+    };
+  }
+
+  if (customStats && typeof customStats === 'object') {
+    appSettings.customStats = {
+      totalCodes: Number(customStats.totalCodes) || appSettings.customStats?.totalCodes || 0,
+      activeUsers: Number(customStats.activeUsers) || appSettings.customStats?.activeUsers || 0,
+      uniqueVisitors: Number(customStats.uniqueVisitors) || appSettings.customStats?.uniqueVisitors || 0,
+    };
+  }
+
+  // 1. Immediately persist to disk JSON database
+  saveDatabase();
+
+  // 2. Commit to persistent Firestore database
+  try {
+    const adapter = dbManager.getAdapter();
+    if (adapter.saveSettings) {
+      await adapter.saveSettings(appSettings);
+      console.log('[Admin] Settings successfully saved to Firestore database.');
+    }
+  } catch (err) {
+    console.warn('[Database] Settings Firestore save warning:', err);
+  }
+
+  // 3. Instant zero-read broadcast to all active connected users
+  broadcastRealtime('settings_updated', appSettings);
+  broadcastRealtime('stats_updated', getLiveStats());
+  broadcastRealtime('codes_updated', {
+    codes: codesDatabase.filter((c) => c.status !== 'disabled'),
+    stats: getLiveStats(),
+  });
+
+  res.json({
+    success: true,
+    message: 'এডমিন প্যানেলের সমস্ত কার্যক্রম ডাটাবেজে সফলভাবে সংরক্ষিত হয়েছে!',
+    settings: appSettings,
+    stats: getLiveStats(),
+  });
+});
+
+// 2. Get Codes with Filtering, Search & Sorting (Always returns ALL database codes by default)
 app.get('/api/codes', (req: Request, res: Response) => {
-  const { filter = 'all', sort = 'newest', search = '', hideUsed = 'false', page = '1', limit = '30' } = req.query;
+  const { filter = 'all', sort = 'newest', search = '', hideUsed = 'false', page, limit } = req.query;
 
   let result = codesDatabase.filter((c) => c.status !== 'disabled');
 
@@ -362,9 +656,6 @@ app.get('/api/codes', (req: Request, res: Response) => {
         (c.nickname && c.nickname.toLowerCase().includes(q))
     );
   }
-
-  // Hide used is handled client-side per user (grayed out + strikethrough), never filter out codes from DB
-  // to avoid hiding actual working codes globally.
 
   // Filter tag
   if (filter === 'new') {
@@ -391,9 +682,29 @@ app.get('/api/codes', (req: Request, res: Response) => {
     result.sort((a, b) => b.copyCount - a.copyCount);
   }
 
-  // Pagination (Default 100 codes as requested by user)
+  // Strictly deduplicate result so each referral code appears only once
+  const seenUniqueKeys = new Set<string>();
+  result = result.filter((c) => {
+    const key = (c.normalizedCode || c.code || '').trim().toUpperCase();
+    if (seenUniqueKeys.has(key)) return false;
+    seenUniqueKeys.add(key);
+    return true;
+  });
+
+  // Default behavior: Always return ALL codes present in the database so no codes are hidden!
+  const isExplicitPagination = page !== undefined && limit !== undefined && limit !== 'all';
+  if (!isExplicitPagination) {
+    return res.json({
+      codes: result,
+      total: result.length,
+      page: 1,
+      totalPages: 1,
+      hasMore: false,
+    });
+  }
+
   const pageNum = parseInt(page as string, 10) || 1;
-  const limitNum = parseInt(limit as string, 10) || 100;
+  const limitNum = parseInt(limit as string, 10) || result.length;
   const startIndex = (pageNum - 1) * limitNum;
   const paginatedCodes = result.slice(startIndex, startIndex + limitNum);
 
@@ -407,36 +718,28 @@ app.get('/api/codes', (req: Request, res: Response) => {
 });
 
 // Batch Submit Codes (Admin / AI Bulk Splitter)
-app.post('/api/admin/codes/batch', (req: Request, res: Response) => {
+app.post('/api/admin/codes/batch', async (req: Request, res: Response) => {
   const { codes, nickname } = req.body;
   if (!Array.isArray(codes) || codes.length === 0) {
     return res.status(400).json({ error: 'No codes provided' });
   }
 
   const added: NusukCodeEntity[] = [];
-  const regex = /^NG-[A-Za-z0-9]{6,14}$/;
 
   codes.forEach((raw) => {
-    if (typeof raw !== 'string') return;
-    let cleanCode = raw.trim();
-    if (!cleanCode.toUpperCase().startsWith('NG-') && !cleanCode.toUpperCase().startsWith('NG')) {
-      cleanCode = 'NG-' + cleanCode;
-    } else if (cleanCode.toUpperCase().startsWith('NG') && !cleanCode.startsWith('NG-') && !cleanCode.startsWith('ng-')) {
-      cleanCode = 'NG-' + cleanCode.slice(2);
-    }
-    const parts = cleanCode.split('-');
-    cleanCode = `NG-${parts.slice(1).join('-').trim()}`;
+    const cleaned = cleanNusukCode(raw);
+    if (!cleaned) return;
 
-    if (!regex.test(cleanCode)) return;
-    const normalized = cleanCode.toUpperCase();
-
-    if (!codesDatabase.some((c) => c.normalizedCode === normalized) && !added.some((c) => c.normalizedCode === normalized)) {
+    if (
+      !codesDatabase.some((c) => c.normalizedCode === cleaned.normalizedCode) &&
+      !added.some((c) => c.normalizedCode === cleaned.normalizedCode)
+    ) {
       const entity: NusukCodeEntity = {
         id: `code-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        code: cleanCode,
-        normalizedCode: normalized,
-        nickname: nickname || 'ব্যাচ যুক্ত',
-        status: 'recent',
+        code: cleaned.code,
+        normalizedCode: cleaned.normalizedCode,
+        nickname: nickname ? nickname.trim().slice(0, 30) : 'ব্যাচ যুক্ত',
+        status: 'verified',
         copyCount: 0,
         reportCount: 0,
         isPinned: false,
@@ -451,65 +754,58 @@ app.post('/api/admin/codes/batch', (req: Request, res: Response) => {
   if (added.length > 0) {
     codesDatabase.unshift(...added);
     saveDatabase();
-    // Sync to remote database adapter asynchronously
-    const adapter = dbManager.getAdapter();
-    for (const item of added) {
-      adapter.addCode(item).catch(() => {});
+    // Immediate batch write to database (Firestore / active adapter)
+    try {
+      await dbManager.getAdapter().addCodesBatch(added);
+    } catch (err) {
+      console.warn('[Database] Batch add warning:', err);
     }
+    // Zero-read instant real-time broadcast to all connected devices
+    broadcastRealtime('batch_added', {
+      codes: added,
+      count: added.length,
+      stats: getLiveStats(),
+    });
   }
 
   res.json({ success: true, count: added.length, codes: added });
 });
 
-// 3. Submit New Code
-app.post('/api/codes', (req: Request, res: Response) => {
-  const { code, nickname, honeypot } = req.body;
-  const clientIp = req.ip || req.headers['x-forwarded-for']?.toString() || 'unknown';
-
-  // Anti-Spam Bot trap
-  if (honeypot) {
-    return res.status(400).json({ error: 'Bot detected' });
+// Dedicated Admin Add Single Code Endpoint (Direct database commit + bypass rate limits)
+app.post('/api/admin/codes', async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.includes('nusuk-admin-token-2026')) {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  // Rate Limiting check
-  if (!checkRateLimit(clientIp)) {
-    return res.status(429).json({ error: 'errorRateLimit' });
+  const { code, nickname } = req.body;
+  const cleaned = cleanNusukCode(code);
+  if (!cleaned) {
+    return res.status(400).json({ error: 'errorInvalidFormat', message: 'অবৈধ কোড ফরম্যাট। কোড NG- দিয়ে শুরু হতে হবে।' });
   }
-
-  if (!code || typeof code !== 'string') {
-    return res.status(400).json({ error: 'errorInvalidFormat' });
-  }
-
-  // Normalize code
-  let cleanCode = code.trim();
-  if (!cleanCode.toUpperCase().startsWith('NG-') && !cleanCode.toUpperCase().startsWith('NG')) {
-    cleanCode = 'NG-' + cleanCode;
-  } else if (cleanCode.toUpperCase().startsWith('NG') && !cleanCode.startsWith('NG-') && !cleanCode.startsWith('ng-')) {
-    cleanCode = 'NG-' + cleanCode.slice(2);
-  }
-  const parts = cleanCode.split('-');
-  cleanCode = `NG-${parts.slice(1).join('-').trim()}`;
-
-  // Validate format
-  const regex = /^NG-[A-Za-z0-9]{6,14}$/;
-  if (!regex.test(cleanCode)) {
-    return res.status(400).json({ error: 'errorInvalidFormat' });
-  }
-
-  const normalized = cleanCode.toUpperCase();
 
   // Duplicate Check
-  const existing = codesDatabase.find((c) => c.normalizedCode === normalized);
+  const existing = codesDatabase.find((c) => c.normalizedCode === cleaned.normalizedCode);
   if (existing) {
-    return res.status(409).json({ error: 'errorDuplicateCode' });
+    // If it was disabled, automatically restore and verify it
+    if (existing.status === 'disabled') {
+      existing.status = 'verified';
+      existing.reportCount = 0;
+      existing.updatedAt = new Date().toISOString();
+      saveDatabase();
+      dbManager.getAdapter().updateCode(existing.id, { status: 'verified', reportCount: 0 }).catch(() => {});
+      broadcastRealtime('code_action', { action: 'verify', id: existing.id, code: existing, stats: getLiveStats() });
+      return res.json({ success: true, code: existing, message: 'পূর্বে বন্ধ থাকা কোডটি পুনরায় সক্রিয় করা হয়েছে!' });
+    }
+    return res.status(409).json({ error: 'errorDuplicateCode', message: 'এই কোডটি ইতোমধ্যে ডাটাবেজে বিদ্যমান রয়েছে।' });
   }
 
   const newCodeEntity: NusukCodeEntity = {
     id: `code-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-    code: cleanCode,
-    normalizedCode: normalized,
-    nickname: nickname ? nickname.trim().slice(0, 30) : undefined,
-    status: 'recent',
+    code: cleaned.code,
+    normalizedCode: cleaned.normalizedCode,
+    nickname: nickname ? nickname.trim().slice(0, 30) : 'অ্যাডমিন যুক্ত',
+    status: 'verified',
     copyCount: 0,
     reportCount: 0,
     isPinned: false,
@@ -518,16 +814,157 @@ app.post('/api/codes', (req: Request, res: Response) => {
     reports: [],
   };
 
-  // Add to top of in-memory list
+  // 1. Immediately insert at top of memory cache
   codesDatabase.unshift(newCodeEntity);
   saveDatabase();
 
-  // Async save to Firestore / database adapter
-  dbManager.getAdapter().addCode(newCodeEntity).catch((err) => {
-    console.warn('[Database] Async addCode sync warning:', err);
+  // 2. Commit to persistent database (Firestore / active adapter)
+  try {
+    await dbManager.getAdapter().addCode(newCodeEntity);
+    console.log(`[Admin] Code ${newCodeEntity.code} successfully persisted to database.`);
+  } catch (err) {
+    console.warn('[Database] Code save to Firestore warning:', err);
+  }
+
+  // 3. Zero-read instant real-time broadcast to all connected users
+  broadcastRealtime('code_added', {
+    code: newCodeEntity,
+    stats: getLiveStats(),
   });
 
   res.status(201).json({ success: true, code: newCodeEntity });
+});
+
+// 3. Submit New Code (from public or admin)
+app.post('/api/codes', async (req: Request, res: Response) => {
+  const { code, nickname, honeypot } = req.body;
+  const clientIp = req.ip || req.headers['x-forwarded-for']?.toString() || 'unknown';
+  const isAdmin = req.headers.authorization?.includes('nusuk-admin-token-2026');
+
+  // Anti-Spam Bot trap (for public submissions)
+  if (!isAdmin && honeypot) {
+    return res.status(400).json({ error: 'Bot detected' });
+  }
+
+  const cleaned = cleanNusukCode(code);
+  if (!cleaned) {
+    return res.status(400).json({ error: 'errorInvalidFormat', message: 'সঠিক ফরম্যাটে কোড দিন' });
+  }
+
+  const now = Date.now();
+
+  // 1. User Cooldown Rule:
+  // একজন ইউজার কোড শেয়ার করার ৪ মিনিট আগে আর শেয়ার করতে পারবে না।
+  // ৪ মিনিট আগে শেয়ার করতে গেলে টোস্ট নোটিশে বলা হবে "ইতিমধ্যে তালিকাভুক্ত রয়েছে"।
+  if (!isAdmin) {
+    const lastUserShare = userLastShareMap.get(clientIp);
+    if (lastUserShare && (now - lastUserShare) < FOUR_MINUTES_MS) {
+      return res.status(409).json({
+        success: false,
+        error: 'already_listed',
+        message: 'ইতিমধ্যে তালিকাভুক্ত রয়েছে',
+        remainingSeconds: Math.ceil((FOUR_MINUTES_MS - (now - lastUserShare)) / 1000),
+      });
+    }
+  }
+
+  // 2. Check if this code already exists in the database
+  const existingIndex = codesDatabase.findIndex((c) => c.normalizedCode === cleaned.normalizedCode);
+  if (existingIndex !== -1) {
+    const existing = codesDatabase[existingIndex];
+    const existingAgeMs = now - new Date(existing.createdAt).getTime();
+
+    // If this code was listed less than 4 minutes ago, prevent re-sharing
+    if (!isAdmin && existingAgeMs < FOUR_MINUTES_MS) {
+      return res.status(409).json({
+        success: false,
+        error: 'already_listed',
+        message: 'ইতিমধ্যে তালিকাভুক্ত রয়েছে',
+        remainingSeconds: Math.ceil((FOUR_MINUTES_MS - existingAgeMs) / 1000),
+      });
+    }
+
+    // 4 minutes have passed: bump this existing code to top without creating duplicate
+    existing.createdAt = new Date(now).toISOString();
+    existing.updatedAt = new Date(now).toISOString();
+    existing.status = 'recent';
+    if (nickname) {
+      existing.nickname = nickname.trim().slice(0, 30);
+    }
+
+    // Move to the very top (index 0)
+    codesDatabase.splice(existingIndex, 1);
+    codesDatabase.unshift(existing);
+
+    if (!isAdmin) {
+      userLastShareMap.set(clientIp, now);
+    }
+
+    saveDatabase();
+
+    // Broadcast over SSE with zero DB reads
+    broadcastRealtime('code_bumped', {
+      code: existing,
+      stats: getLiveStats(),
+    });
+    broadcastRealtime('codes_updated', {
+      codes: codesDatabase.filter((c) => c.status !== 'disabled'),
+      stats: getLiveStats(),
+    });
+
+    return res.status(200).json({
+      success: true,
+      code: existing,
+      message: 'সফলভাবে তালিকা ভুক্ত করা হয়েছে',
+    });
+  }
+
+  // 3. New unique code creation
+  const newCodeEntity: NusukCodeEntity = {
+    id: `code-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    code: cleaned.code,
+    normalizedCode: cleaned.normalizedCode,
+    nickname: nickname ? nickname.trim().slice(0, 30) : undefined,
+    status: isAdmin ? 'verified' : 'recent',
+    copyCount: 0,
+    reportCount: 0,
+    isPinned: false,
+    createdAt: new Date(now).toISOString(),
+    updatedAt: new Date(now).toISOString(),
+    reports: [],
+  };
+
+  // Instantly place on top of in-memory list
+  codesDatabase.unshift(newCodeEntity);
+
+  if (!isAdmin) {
+    userLastShareMap.set(clientIp, now);
+  }
+
+  saveDatabase();
+
+  // Commit to Firestore Database
+  try {
+    await dbManager.getAdapter().addCode(newCodeEntity);
+  } catch (err) {
+    console.warn('[Database] Code save to Firestore warning:', err);
+  }
+
+  // Zero-read real-time broadcast to all active users
+  broadcastRealtime('code_added', {
+    code: newCodeEntity,
+    stats: getLiveStats(),
+  });
+  broadcastRealtime('codes_updated', {
+    codes: codesDatabase.filter((c) => c.status !== 'disabled'),
+    stats: getLiveStats(),
+  });
+
+  res.status(201).json({
+    success: true,
+    code: newCodeEntity,
+    message: 'সফলভাবে তালিকা ভুক্ত করা হয়েছে',
+  });
 });
 
 // 4. Increment Copy Count
@@ -542,11 +979,13 @@ app.post('/api/codes/:id/copy', (req: Request, res: Response) => {
   target.updatedAt = new Date().toISOString();
   saveDatabase();
 
-  // Async update to database adapter
-  dbManager.getAdapter().updateCode(id, {
+  // In-memory and local disk persist copy counts to eliminate excessive database writes and snapshot triggers
+
+  // Broadcast copy count update in real-time
+  broadcastRealtime('code_copied', {
+    id,
     copyCount: target.copyCount,
-    updatedAt: target.updatedAt,
-  }).catch(() => {});
+  });
 
   res.json({ success: true, copyCount: target.copyCount });
 });
@@ -598,16 +1037,64 @@ app.get('/api/database/status', (req: Request, res: Response) => {
     scaleCapability: '1,000,000+ concurrent visitors without Firestore read overhead',
     projectId: 'nusukhub',
     collection: 'nusuk_codes',
+    adminAuthSecuredInDB: true,
   });
 });
 
-// 7. Admin Endpoints
-app.post('/api/admin/login', (req: Request, res: Response) => {
+// 7. Admin Endpoints: Secure Database-Driven Authentication
+app.post('/api/admin/login', async (req: Request, res: Response) => {
   const { passcode } = req.body;
-  if (passcode === 'admin2026' || passcode === 'nusukadmin') {
+  if (!passcode || typeof passcode !== 'string') {
+    return res.status(400).json({ error: 'পাসকোড প্রদান করুন' });
+  }
+  const clean = passcode.trim();
+
+  // Check cached passcode (fast O(1) in-memory)
+  if (clean === cachedAdminPasscode) {
     return res.json({ success: true, token: 'nusuk-admin-token-2026' });
   }
-  res.status(401).json({ error: 'Invalid passcode' });
+
+  // If not matching, re-fetch live from Firestore database to ensure accuracy
+  try {
+    const livePasscode = await dbManager.getAdapter().getAdminPasscode();
+    if (livePasscode) {
+      cachedAdminPasscode = livePasscode;
+      if (clean === livePasscode) {
+        return res.json({ success: true, token: 'nusuk-admin-token-2026' });
+      }
+    }
+  } catch (err) {
+    console.warn('[Admin Auth] Error checking live passcode from database:', err);
+  }
+
+  res.status(401).json({ error: 'ভুল এডমিন পাসওয়ার্ড' });
+});
+
+// 8. Admin Endpoint: Change & Secure Admin Passcode in Database
+app.post('/api/admin/change-passcode', async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.includes('nusuk-admin-token-2026')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const { newPasscode } = req.body;
+  if (!newPasscode || typeof newPasscode !== 'string' || newPasscode.trim().length < 4) {
+    return res.status(400).json({ error: 'পাসওয়ার্ড কমপক্ষে ৪ অক্ষরের হতে হবে।' });
+  }
+
+  const clean = newPasscode.trim();
+  try {
+    const success = await dbManager.getAdapter().setAdminPasscode(clean);
+    if (success) {
+      cachedAdminPasscode = clean;
+      saveDatabase();
+      return res.json({ success: true, message: 'এডমিন পাসওয়ার্ড সফলভাবে ডাটাবেজে আপডেট ও সুরক্ষিত হয়েছে!' });
+    }
+  } catch (err) {
+    console.error('[Admin] Error saving passcode to database:', err);
+  }
+
+  return res.status(500).json({ error: 'ডাটাবেজে পাসওয়ার্ড সংরক্ষণ করতে সমস্যা হয়েছে।' });
 });
 
 app.get('/api/admin/codes', (req: Request, res: Response) => {
@@ -652,6 +1139,14 @@ app.post('/api/admin/codes/:id/action', (req: Request, res: Response) => {
   }
 
   saveDatabase();
+
+  broadcastRealtime('code_action', {
+    action,
+    id,
+    code: target,
+    stats: getLiveStats(),
+  });
+
   res.json({ success: true, code: target });
 });
 

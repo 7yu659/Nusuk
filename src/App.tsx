@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AppStats, CodeSort, NusukCode } from './types';
-import { fetchCodes, fetchStats, recordCopy } from './lib/api';
+import { fetchCodes, fetchStats, recordCopy, fetchAppSettings } from './lib/api';
 import { normalizeLiveTimestamps } from './lib/liveSync';
 import { Header } from './components/Header';
 import { StatsBar } from './components/StatsBar';
@@ -19,10 +19,28 @@ export default function App() {
     return saved !== 'light';
   });
 
-  // Stats & Codes State
+  // Stats & Codes State (Instant local cache for 0ms initial load)
   const [stats, setStats] = useState<AppStats | null>(null);
-  const [codes, setCodes] = useState<NusukCode[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [codes, setCodes] = useState<NusukCode[]>(() => {
+    try {
+      const saved = localStorage.getItem('nusuk_codes_cache');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('nusuk_codes_cache');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return false;
+      }
+    } catch {}
+    return true;
+  });
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Custom Admin Controls State
@@ -114,17 +132,28 @@ export default function App() {
   const loadData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setIsRefreshing(true);
     try {
-      const [statsData, codesData] = await Promise.all([
+      const [statsData, codesData, settingsData] = await Promise.all([
         fetchStats(),
         fetchCodes({
           sort,
-          page: 1,
-          limit: 100,
         }),
+        fetchAppSettings(),
       ]);
 
       setStats(statsData);
       setCodes(normalizeLiveTimestamps(codesData.codes));
+
+      if (settingsData) {
+        if (settingsData.pinnedCode) {
+          setCustomPinnedCode(settingsData.pinnedCode);
+        }
+        if (settingsData.notice) {
+          setNotice(settingsData.notice);
+        }
+        if (settingsData.stats) {
+          setStats(settingsData.stats);
+        }
+      }
     } catch (err) {
       console.error('Failed to load data:', err);
     } finally {
@@ -140,27 +169,182 @@ export default function App() {
     loadData();
   }, [loadData]);
 
-  // Periodic live stats subtle sync (reflects live visitor traffic)
+  // Real-time zero-read instant synchronization across all users via Server-Sent Events (SSE)
   useEffect(() => {
-    const statsInterval = setInterval(() => {
+    let evtSource: EventSource | null = null;
+
+    try {
+      evtSource = new EventSource('/api/realtime/stream');
+
+      // 1. Single Code Added (Admin or Public)
+      evtSource.addEventListener('code_added', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data && data.code) {
+            const newCodeItem: NusukCode = data.code;
+            setCodes((prev) => {
+              if (prev.some((c) => c.normalizedCode === newCodeItem.normalizedCode || c.id === newCodeItem.id)) {
+                return prev;
+              }
+              const pinned = prev.filter((c) => c.isPinned);
+              const unpinned = prev.filter((c) => !c.isPinned);
+              return [...pinned, newCodeItem, ...unpinned];
+            });
+            if (data.stats) {
+              setStats((prev) => (prev ? { ...prev, ...data.stats } : data.stats));
+            }
+          }
+        } catch (err) {
+          console.warn('Realtime code_added parse error:', err);
+        }
+      });
+
+      // 2. Batch Codes Added (Admin Multi-line Import)
+      evtSource.addEventListener('batch_added', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data && Array.isArray(data.codes)) {
+            const incoming: NusukCode[] = data.codes;
+            setCodes((prev) => {
+              const existingSet = new Set(prev.map((c) => c.normalizedCode));
+              const fresh = incoming.filter((c) => !existingSet.has(c.normalizedCode));
+              if (fresh.length === 0) return prev;
+              const pinned = prev.filter((c) => c.isPinned);
+              const unpinned = prev.filter((c) => !c.isPinned);
+              return [...pinned, ...fresh, ...unpinned];
+            });
+            if (data.stats) {
+              setStats((prev) => (prev ? { ...prev, ...data.stats } : data.stats));
+            }
+          }
+        } catch (err) {
+          console.warn('Realtime batch_added parse error:', err);
+        }
+      });
+
+      // 3. Database Sync / Bulk Status Changes
+      evtSource.addEventListener('codes_updated', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data && Array.isArray(data.codes)) {
+            setCodes(normalizeLiveTimestamps(data.codes));
+            if (data.stats) {
+              setStats((prev) => (prev ? { ...prev, ...data.stats } : data.stats));
+            }
+          }
+        } catch (err) {
+          console.warn('Realtime codes_updated parse error:', err);
+        }
+      });
+
+      // 4. Admin Actions (Verify, Disable, Pin, Delete, Restore)
+      evtSource.addEventListener('code_action', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data && data.id) {
+            setCodes((prev) => {
+              if (data.action === 'delete' || data.action === 'disable') {
+                return prev.filter((c) => c.id !== data.id);
+              }
+              return prev.map((c) => {
+                if (c.id === data.id) {
+                  return {
+                    ...c,
+                    ...(data.code || {}),
+                    status: data.action === 'verify' ? 'verified' : data.action === 'restore' ? 'available' : c.status,
+                    isPinned: data.action === 'pin' ? !c.isPinned : c.isPinned,
+                  };
+                }
+                return c;
+              });
+            });
+            if (data.stats) {
+              setStats((prev) => (prev ? { ...prev, ...data.stats } : data.stats));
+            }
+          }
+        } catch (err) {
+          console.warn('Realtime code_action parse error:', err);
+        }
+      });
+
+      // 5. Real-time Copy Counter
+      evtSource.addEventListener('code_copied', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data && data.id) {
+            setCodes((prev) =>
+              prev.map((c) => (c.id === data.id ? { ...c, copyCount: data.copyCount } : c))
+            );
+          }
+        } catch {}
+      });
+
+      // 6. Real-time Database Settings Sync (Pinned Code, Notice Bar, Stats)
+      evtSource.addEventListener('settings_updated', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data) {
+            if (data.pinnedCode) setCustomPinnedCode(data.pinnedCode);
+            if (data.notice) setNotice(data.notice);
+          }
+        } catch (err) {
+          console.warn('Realtime settings_updated parse error:', err);
+        }
+      });
+
+      evtSource.addEventListener('notice_updated', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data) setNotice(data);
+        } catch {}
+      });
+
+      evtSource.addEventListener('pinned_updated', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data && data.pinnedCode) setCustomPinnedCode(data.pinnedCode);
+        } catch {}
+      });
+
+      evtSource.addEventListener('stats_updated', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data) setStats(data);
+        } catch {}
+      });
+
+      evtSource.addEventListener('init', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data?.settings) {
+            if (data.settings.pinnedCode) setCustomPinnedCode(data.settings.pinnedCode);
+            if (data.settings.notice) setNotice(data.settings.notice);
+          }
+          if (data?.stats) setStats(data.stats);
+        } catch {}
+      });
+
+      evtSource.onerror = () => {
+        // EventSource will automatically retry connecting
+      };
+    } catch (err) {
+      console.warn('EventSource initialization warning:', err);
+    }
+
+    // Minimal background sync fallback (runs every 2 minutes only as an edge reconnect safety net)
+    const fallbackTimer = setInterval(() => {
       fetchStats()
-        .then((res) => {
-          setStats((prev) => {
-            if (!prev) return res;
-            const variance = Math.floor(Math.random() * 3) - 1; // -1, 0, or +1
-            return {
-              ...res,
-              totalCodes: Math.max(prev.totalCodes, res.totalCodes),
-              activeUsers: Math.max(14, res.activeUsers + variance),
-              uniqueVisitors: Math.max(prev.uniqueVisitors, res.uniqueVisitors),
-            };
-          });
+        .then((s) => {
+          if (s) setStats((prev) => (prev ? { ...prev, ...s } : s));
         })
         .catch(() => {});
-    }, 15000);
+    }, 120000);
 
     return () => {
-      clearInterval(statsInterval);
+      clearInterval(fallbackTimer);
+      if (evtSource) {
+        evtSource.close();
+      }
     };
   }, []);
 
@@ -222,7 +406,7 @@ export default function App() {
     setStats((prev) =>
       prev ? { ...prev, totalCodes: prev.totalCodes + 1, todayCodes: prev.todayCodes + 1 } : null
     );
-    triggerToast('কোড সফলভাবে শেয়ার হয়েছে!', 'আপনার কোড এখন লাইভ বোর্ডের শীর্ষে অবস্থান করছে');
+    loadData();
   };
 
   // Handle App Share
@@ -357,6 +541,7 @@ export default function App() {
         onClose={() => setIsShareModalOpen(false)}
         language="bn"
         onSuccess={handleCodeSubmitted}
+        onToast={triggerToast}
       />
 
       {/* Nusuk Guide Modal */}

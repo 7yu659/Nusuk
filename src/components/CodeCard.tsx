@@ -35,11 +35,13 @@ export const CodeCard: React.FC<CodeCardProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
 
-  // Card 0 is the 1st card which receives the exclusive highlight
+  // Card 0 is the 1st card; Card 1 is the 2nd card
   const isFirstCard = cardIndex === 0;
+  const isSecondCard = cardIndex === 1;
 
   // Track code updates & cycle changes
   const [isCodeUpdated, setIsCodeUpdated] = useState(false);
+  const [isSecondUpdated, setIsSecondUpdated] = useState(false);
   const prevCodeRef = useRef(codeItem.code);
   const prevCycleRef = useRef(cycleCount);
 
@@ -54,7 +56,7 @@ export const CodeCard: React.FC<CodeCardProps> = ({
     }
   }, [isFirstCard, isLatest]);
 
-  // Highlight whenever code updates or cycle changes
+  // Highlight whenever code updates or cycle changes (first 2 cards jhapti update)
   useEffect(() => {
     const codeChanged = prevCodeRef.current !== codeItem.code;
     const cycleChanged = prevCycleRef.current !== cycleCount;
@@ -68,12 +70,19 @@ export const CodeCard: React.FC<CodeCardProps> = ({
           setIsCodeUpdated(false);
         }, 2400);
         return () => clearTimeout(timeout);
+      } else if (isSecondCard) {
+        setIsSecondUpdated(true);
+        const timeout = setTimeout(() => {
+          setIsSecondUpdated(false);
+        }, 2000);
+        return () => clearTimeout(timeout);
       }
     }
-  }, [codeItem.code, cycleCount, isFirstCard]);
+  }, [codeItem.code, cycleCount, isFirstCard, isSecondCard]);
 
-  // Highlight happens ONLY on the 1st card (Card 0) and when not used
+  // Highlight happens on the first 2 cards during jhapti transitions
   const isHighlighted = isFirstCard && isCodeUpdated && !isUsed;
+  const isSecondHighlighted = isSecondCard && isSecondUpdated && !isUsed;
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -119,6 +128,8 @@ export const CodeCard: React.FC<CodeCardProps> = ({
           ? 'bg-slate-100/90 dark:bg-[#15161b] border-slate-300/90 dark:border-[#252834] opacity-60 dark:opacity-50 saturate-50 shadow-slate-900/5'
           : isHighlighted
           ? 'bg-white dark:bg-[#1c1e24] border-blue-500 dark:border-sky-400 ring-2 ring-blue-500/50 dark:ring-sky-400/50 shadow-md shadow-blue-500/20'
+          : isSecondHighlighted
+          ? 'bg-white dark:bg-[#1c1e24] border-blue-400/60 dark:border-sky-400/50 ring-1 ring-blue-400/25 dark:ring-sky-400/25 shadow-sm shadow-blue-500/10'
           : 'bg-white dark:bg-[#1c1e24] border-slate-200/90 dark:border-[#2b2f3b] hover:border-blue-400/40 dark:hover:border-blue-500/30 shadow-slate-900/5 dark:shadow-black/25'
       }`}
     >
@@ -172,15 +183,6 @@ export const CodeCard: React.FC<CodeCardProps> = ({
 
         {/* Timestamp on Top */}
         <div className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-neutral-400 shrink-0">
-          {isLatest && !isUsed && (
-            <button
-              onClick={handleManualCycle}
-              title="পরবর্তী কোড দেখান"
-              className="p-1 rounded-md text-slate-400 hover:text-blue-600 dark:hover:text-sky-400 hover:bg-slate-100 dark:hover:bg-[#252831] transition-all cursor-pointer active:scale-95"
-            >
-              <RefreshCw className={`w-3 h-3 ${isHighlighted ? 'animate-spin text-blue-600 dark:text-sky-400' : ''}`} />
-            </button>
-          )}
 
           <span
             className={`w-1.5 h-1.5 rounded-full inline-block transition-colors ${
@@ -217,6 +219,8 @@ export const CodeCard: React.FC<CodeCardProps> = ({
             ? 'bg-slate-200/60 dark:bg-[#101217] border border-slate-300/80 dark:border-[#22242d]'
             : isHighlighted
             ? 'border border-blue-500/80 dark:border-sky-400/80 ring-2 ring-blue-500/35 bg-blue-50/50 dark:bg-blue-950/40 shadow-xs'
+            : isSecondHighlighted
+            ? 'border border-blue-400/50 dark:border-sky-400/50 ring-1 ring-blue-400/20 bg-blue-50/25 dark:bg-blue-950/25 shadow-2xs'
             : 'bg-slate-50 dark:bg-[#121316] border border-slate-200/80 dark:border-[#252832]'
         }`}
       >

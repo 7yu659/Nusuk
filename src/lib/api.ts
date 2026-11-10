@@ -168,16 +168,61 @@ export async function fetchStats(): Promise<AppStats> {
   };
 }
 
+export interface AppSettingsData {
+  pinnedCode: string;
+  notice: {
+    enabled: boolean;
+    text: string;
+  };
+  customStats?: {
+    totalCodes?: number;
+    activeUsers?: number;
+    uniqueVisitors?: number;
+  };
+  stats?: AppStats;
+}
+
+export async function fetchAppSettings(): Promise<AppSettingsData | null> {
+  try {
+    const res = await fetch('/api/settings');
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.warn('API /api/settings error:', err);
+  }
+  return null;
+}
+
+export async function updateAdminSettings(
+  settings: Partial<AppSettingsData>,
+  token: string
+): Promise<{ success: boolean; settings?: AppSettingsData; message?: string }> {
+  try {
+    const res = await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(settings),
+    });
+    return await res.json();
+  } catch (err) {
+    console.warn('API /api/admin/settings error:', err);
+    return { success: false, message: 'সার্ভারে সেটিংস সেভ করতে সমস্যা হয়েছে।' };
+  }
+}
+
 export async function fetchCodes(params: FetchCodesParams = {}): Promise<FetchCodesResponse> {
-  const { filter = 'all', sort = 'newest', search = '', hideUsed = false, page = 1, limit = 100 } = params;
+  const { filter = 'all', sort = 'newest', search = '', hideUsed = false } = params;
   
   const query = new URLSearchParams({
     filter,
     sort,
     search,
     hideUsed: String(hideUsed),
-    page: String(page),
-    limit: String(limit),
+    limit: 'all', // Always fetch ALL codes from the database so no codes are hidden
   });
 
   try {
@@ -224,26 +269,70 @@ export async function fetchCodes(params: FetchCodesParams = {}): Promise<FetchCo
   };
 }
 
-export async function submitNewCode(code: string, nickname?: string, honeypot?: string): Promise<{ success: boolean; code?: NusukCode; error?: string }> {
+export async function submitAdminCode(
+  code: string,
+  nickname?: string,
+  token?: string
+): Promise<{ success: boolean; code?: NusukCode; error?: string; message?: string }> {
   try {
+    const res = await fetch('/api/admin/codes', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ code, nickname }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'errorGeneric', message: data.message };
+    }
+    return { success: true, code: data.code, message: data.message };
+  } catch (err) {
+    console.warn('Admin code submission error:', err);
+    return { success: false, error: 'networkError', message: 'সার্ভারের সাথে সংযোগ স্থাপন করা যায়নি।' };
+  }
+}
+
+export async function submitNewCode(
+  code: string,
+  nickname?: string,
+  honeypot?: string,
+  token?: string
+): Promise<{ success: boolean; code?: NusukCode; error?: string; message?: string }> {
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const res = await fetch('/api/codes', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ code, nickname, honeypot }),
     });
 
     const data = await res.json();
     if (!res.ok) {
-      return { success: false, error: data.error || 'errorGeneric' };
+      return {
+        success: false,
+        error: data.error || 'errorGeneric',
+        message: data.message || (data.error === 'already_listed' || data.error === 'errorDuplicateCode' ? 'ইতিমধ্যে তালিকাভুক্ত রয়েছে' : undefined),
+      };
     }
-    return { success: true, code: data.code };
+    return {
+      success: true,
+      code: data.code,
+      message: data.message || 'সফলভাবে তালিকা ভুক্ত করা হয়েছে',
+    };
   } catch (err) {
     console.warn('API error, falling back to local addition:', err);
     // Offline local fallback
     const local = getLocalCodes();
     const clean = code.trim().toUpperCase();
     if (local.some((c) => c.normalizedCode === clean)) {
-      return { success: false, error: 'errorDuplicateCode' };
+      return { success: false, error: 'already_listed', message: 'ইতিমধ্যে তালিকাভুক্ত রয়েছে' };
     }
     const newCode: NusukCode = {
       id: `local-${Date.now()}`,
@@ -258,15 +347,24 @@ export async function submitNewCode(code: string, nickname?: string, honeypot?: 
       reports: [],
     };
     saveLocalCodes([newCode, ...local]);
-    return { success: true, code: newCode };
+    return { success: true, code: newCode, message: 'সফলভাবে তালিকা ভুক্ত করা হয়েছে' };
   }
 }
 
-export async function submitBatchCodes(codes: string[], nickname?: string): Promise<{ success: boolean; count: number; error?: string }> {
+export async function submitBatchCodes(
+  codes: string[],
+  nickname?: string,
+  token?: string
+): Promise<{ success: boolean; count: number; error?: string }> {
   try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const res = await fetch('/api/admin/codes/batch', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ codes, nickname }),
     });
 
@@ -377,3 +475,25 @@ export async function performAdminAction(id: string, action: string, token: stri
     return false;
   }
 }
+
+export async function updateAdminPasscode(newPasscode: string, token: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const res = await fetch('/api/admin/change-passcode', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ newPasscode }),
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      return { success: true };
+    }
+    return { success: false, error: data.error || 'পাসওয়ার্ড আপডেট করতে ব্যর্থ হয়েছে' };
+  } catch (err) {
+    console.warn('Change passcode error:', err);
+    return { success: false, error: 'সার্ভার যোগাযোগে সমস্যা হয়েছে' };
+  }
+}
+

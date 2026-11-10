@@ -43,6 +43,13 @@ export class LocalJsonAdapter implements IDatabaseAdapter {
     return true;
   }
 
+  async addCodesBatch(codes: NusukCodeEntity[]): Promise<boolean> {
+    if (!codes || codes.length === 0) return true;
+    this.codes.unshift(...codes);
+    this.persist();
+    return true;
+  }
+
   async updateCode(id: string, updates: Partial<NusukCodeEntity>): Promise<boolean> {
     const target = this.codes.find((c) => c.id === id);
     if (!target) return false;
@@ -57,12 +64,84 @@ export class LocalJsonAdapter implements IDatabaseAdapter {
     return true;
   }
 
+  async getAdminPasscode(): Promise<string> {
+    try {
+      if (fs.existsSync(DB_FILE)) {
+        const raw = fs.readFileSync(DB_FILE, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.adminPasscode === 'string') {
+          return parsed.adminPasscode;
+        }
+      }
+    } catch {}
+    return 'admin2026';
+  }
+
+  async setAdminPasscode(passcode: string): Promise<boolean> {
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+      let current: Record<string, unknown> = {};
+      if (fs.existsSync(DB_FILE)) {
+        try {
+          current = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
+        } catch {}
+      }
+      current.adminPasscode = passcode.trim();
+      current.adminPasscodeUpdatedAt = new Date().toISOString();
+      fs.writeFileSync(DB_FILE, JSON.stringify(current, null, 2));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async getSettings(): Promise<any> {
+    try {
+      if (fs.existsSync(DB_FILE)) {
+        const raw = fs.readFileSync(DB_FILE, 'utf-8');
+        const parsed = JSON.parse(raw);
+        return parsed.appSettings || parsed.appConfig || null;
+      }
+    } catch {}
+    return null;
+  }
+
+  async saveSettings(settings: any): Promise<boolean> {
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+      let current: Record<string, unknown> = {};
+      if (fs.existsSync(DB_FILE)) {
+        try {
+          current = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
+        } catch {}
+      }
+      current.appSettings = settings;
+      current.appConfig = settings;
+      fs.writeFileSync(DB_FILE, JSON.stringify(current, null, 2));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private persist() {
     try {
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
       }
-      fs.writeFileSync(DB_FILE, JSON.stringify({ codes: this.codes, lastSaved: new Date().toISOString() }, null, 2));
+      let current: Record<string, unknown> = {};
+      if (fs.existsSync(DB_FILE)) {
+        try {
+          current = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
+        } catch {}
+      }
+      current.codes = this.codes;
+      current.lastSaved = new Date().toISOString();
+      fs.writeFileSync(DB_FILE, JSON.stringify(current, null, 2));
     } catch (err) {
       console.warn('[LocalJSON] persist error:', err);
     }

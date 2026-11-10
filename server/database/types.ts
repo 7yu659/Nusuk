@@ -22,7 +22,12 @@ export interface IDatabaseAdapter {
   init(initialSeedCodes: NusukCodeEntity[]): Promise<void>;
   getAllCodes(): Promise<NusukCodeEntity[]>;
   addCode(code: NusukCodeEntity): Promise<boolean>;
+  addCodesBatch(codes: NusukCodeEntity[]): Promise<boolean>;
   updateCode(id: string, updates: Partial<NusukCodeEntity>): Promise<boolean>;
   deleteCode(id: string): Promise<boolean>;
+  getAdminPasscode(): Promise<string>;
+  setAdminPasscode(passcode: string): Promise<boolean>;
+  getSettings?(): Promise<any>;
+  saveSettings?(settings: any): Promise<boolean>;
   onCodesChanged?(callback: (codes: NusukCodeEntity[]) => void): () => void;
 }

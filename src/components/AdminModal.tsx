@@ -22,7 +22,7 @@ import {
   X
 } from 'lucide-react';
 import { Language, NusukCode, AppStats } from '../types';
-import { fetchAdminCodes, performAdminAction, submitNewCode, submitBatchCodes } from '../lib/api';
+import { fetchAdminCodes, performAdminAction, submitAdminCode, submitNewCode, submitBatchCodes, adminLogin, updateAdminPasscode, updateAdminSettings } from '../lib/api';
 import { formatTimeAgo } from '../lib/validation';
 
 interface AdminModalProps {
@@ -59,6 +59,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [storedSecret, setStoredSecret] = useState<string>(() => {
     return localStorage.getItem('nusuk_admin_secret') || 'nusuk2026';
   });
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isUpdatingPasscode, setIsUpdatingPasscode] = useState(false);
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<'pinned' | 'codes' | 'stats' | 'notice' | 'security'>('pinned');
@@ -168,16 +170,25 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     setTimeout(() => setActionSuccess(null), 2500);
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!passcode.trim()) return;
     setLoginError(false);
-    if (passcode.trim() === storedSecret || passcode.trim() === 'admin2026') {
-      const token = `token-${Date.now()}`;
-      setAuthToken(token);
-      sessionStorage.setItem('nusuk_admin_auth', token);
-      setPasscode('');
-    } else {
+    setIsLoggingIn(true);
+    try {
+      const token = await adminLogin(passcode.trim());
+      if (token) {
+        setAuthToken(token);
+        sessionStorage.setItem('nusuk_admin_auth', token);
+        setPasscode('');
+        showNotification('ডাটাবেজ অথেনটিকেশন সফল! এডমিন প্যানেলে স্বাগতম');
+      } else {
+        setLoginError(true);
+      }
+    } catch {
       setLoginError(true);
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -198,17 +209,26 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   const handleAddNewCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCodeInput.trim()) return;
+    const raw = newCodeInput.trim();
+    if (!raw) return;
 
-    const res = await submitNewCode(newCodeInput.trim().toUpperCase(), newNicknameInput.trim() || 'অ্যাডমিন যুক্ত');
+    if (!authToken) {
+      alert('সেশন মেয়াদোত্তীর্ণ হয়েছে। অনুগ্রহ করে পাসকোড দিয়ে পুনরায় লগইন করুন।');
+      return;
+    }
+
+    const res = await submitAdminCode(raw, newNicknameInput.trim() || 'অ্যাডমিন যুক্ত', authToken);
     if (res.success) {
       setNewCodeInput('');
       setNewNicknameInput('');
-      if (authToken) loadCodes(authToken);
+      if (res.code) {
+        setAdminCodes((prev) => [res.code!, ...prev.filter((c) => c.id !== res.code!.id)]);
+      }
+      loadCodes(authToken);
       onDataModified();
-      showNotification('নতুন কোড সফলভাবে যুক্ত হয়েছে!');
+      showNotification(res.message || 'নতুন কোড সফলভাবে ডাটাবেজে যুক্ত ও লাইভ বোর্ডে প্রকাশিত হয়েছে!');
     } else {
-      alert('কোড যোগ করতে সমস্যা হয়েছে বা কোডটি ইতোমধ্যে বিদ্যমান।');
+      alert(res.message || 'কোড যোগ করতে সমস্যা হয়েছে বা কোডটি ইতোমধ্যে বিদ্যমান।');
     }
   };
 
@@ -216,9 +236,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     if (detectedCodes.length === 0) return;
     setIsBulkSubmitting(true);
     try {
-      const res = await submitBatchCodes(detectedCodes, 'স্মার্ট ব্যাচ ইনপুট');
+      const res = await submitBatchCodes(detectedCodes, 'স্মার্ট ব্যাচ ইনপুট', authToken || undefined);
       if (res.success) {
-        showNotification(`অভিনন্দন! মোট ${res.count}টি কোড সফলভাবে নির্ভুলভাবে যোগ হয়েছে!`);
+        showNotification(`অভিনন্দন! মোট ${res.count}টি কোড সফলভাবে ডাটাবেজে যুক্ত ও লাইভ বোর্ডে প্রকাশিত হয়েছে!`);
         setBulkInput('');
         setDetectedCodes([]);
         if (authToken) loadCodes(authToken);
@@ -233,45 +253,76 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
-  const handleSavePinnedCode = (e: React.FormEvent) => {
+  const handleSavePinnedCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    const clean = pinnedCodeInput.trim().toUpperCase();
+    const clean = pinnedCodeInput.trim();
     if (!clean) return;
     onUpdatePinnedCode(clean);
-    showNotification(`পিন্ড কোড ${clean} তে আপডেট হয়েছে!`);
+    if (authToken) {
+      await updateAdminSettings({ pinnedCode: clean }, authToken);
+    }
+    showNotification(`পিন্ড কোড ${clean} ডাটাবেজে স্থায়ীভাবে সংরক্ষিত ও আপডেট হয়েছে!`);
   };
 
-  const handleSaveStats = (e: React.FormEvent) => {
+  const handleSaveStats = async (e: React.FormEvent) => {
     e.preventDefault();
+    const customStats = {
+      totalCodes: Number(customTotalCodes) || stats?.totalCodes || 0,
+      activeUsers: Number(customActiveUsers) || stats?.activeUsers || 0,
+      uniqueVisitors: Number(customVisitors) || stats?.uniqueVisitors || 0,
+    };
     if (stats) {
       const updated: AppStats = {
         ...stats,
-        totalCodes: Number(customTotalCodes) || stats.totalCodes,
-        activeUsers: Number(customActiveUsers) || stats.activeUsers,
-        uniqueVisitors: Number(customVisitors) || stats.uniqueVisitors,
+        ...customStats,
       };
       onUpdateStats(updated);
-      showNotification('লাইভ স্ট্যাটস সফলভাবে আপডেট হয়েছে!');
     }
+    if (authToken) {
+      await updateAdminSettings({ customStats }, authToken);
+    }
+    showNotification('লাইভ স্ট্যাটস ডাটাবেজে স্থায়ীভাবে সংরক্ষিত হয়েছে!');
   };
 
-  const handleSaveNotice = (e: React.FormEvent) => {
+  const handleSaveNotice = async (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateNotice({ enabled: noticeEnabled, text: noticeText });
-    showNotification('নোটিশ বার সেটিংস সেভ হয়েছে!');
+    const noticeData = { enabled: noticeEnabled, text: noticeText };
+    onUpdateNotice(noticeData);
+    if (authToken) {
+      await updateAdminSettings({ notice: noticeData }, authToken);
+    }
+    showNotification('নোটিশ বার সেটিংস ডাটাবেজে স্থায়ীভাবে সেভ হয়েছে!');
   };
 
-  const handleChangePasscode = (e: React.FormEvent) => {
+  const handleChangePasscode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPasscode.trim() || newPasscode.length < 4) {
       setPasscodeMessage('পাসকোড কমপক্ষে ৪ অক্ষরের হতে হবে।');
       return;
     }
-    setStoredSecret(newPasscode.trim());
-    localStorage.setItem('nusuk_admin_secret', newPasscode.trim());
-    setNewPasscode('');
-    setPasscodeMessage('গোপন পাসওয়ার্ড সফলভাবে পরিবর্তিত হয়েছে!');
-    setTimeout(() => setPasscodeMessage(null), 3000);
+    if (!authToken) {
+      setPasscodeMessage('সেশনের মেয়াদ শেষ, পুনরায় লগইন করুন।');
+      return;
+    }
+
+    setIsUpdatingPasscode(true);
+    try {
+      const res = await updateAdminPasscode(newPasscode.trim(), authToken);
+      if (res.success) {
+        setStoredSecret(newPasscode.trim());
+        localStorage.setItem('nusuk_admin_secret', newPasscode.trim());
+        setNewPasscode('');
+        setPasscodeMessage('গোপন পাসওয়ার্ড সফলভাবে ডাটাবেজে আপডেট ও সুরক্ষিত হয়েছে!');
+        showNotification('ডাটাবেজে এডমিন পাসওয়ার্ড সফলভাবে সংরক্ষিত হয়েছে!');
+        setTimeout(() => setPasscodeMessage(null), 3500);
+      } else {
+        setPasscodeMessage(res.error || 'পাসওয়ার্ড আপডেট করতে সমস্যা হয়েছে।');
+      }
+    } catch {
+      setPasscodeMessage('সার্ভারে যোগাযোগ করা যায়নি।');
+    } finally {
+      setIsUpdatingPasscode(false);
+    }
   };
 
   const handleExportBackup = () => {
@@ -373,17 +424,18 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
               <div className="flex gap-2 pt-1">
                 <button
-                  type="button"
-                  onClick={() => setPasscode('nusuk2026')}
-                  className="px-3 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-[#242730] dark:hover:bg-[#2c303c] text-xs font-semibold text-slate-700 dark:text-neutral-300 border border-slate-200 dark:border-[#363a48] cursor-pointer"
-                >
-                  অটো-ফিল (nusuk2026)
-                </button>
-                <button
                   type="submit"
-                  className="flex-1 h-10 rounded-xl bg-[#0070e0] hover:bg-[#0060c0] text-white font-bold text-xs sm:text-sm cursor-pointer transition-all shadow-sm shadow-blue-500/20 active:scale-95"
+                  disabled={isLoggingIn}
+                  className="w-full h-10 rounded-xl bg-[#0070e0] hover:bg-[#0060c0] text-white font-bold text-xs sm:text-sm cursor-pointer transition-all shadow-sm shadow-blue-500/20 active:scale-95 disabled:opacity-60 flex items-center justify-center gap-1.5"
                 >
-                  প্রবেশ করুন
+                  {isLoggingIn ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>ডাটাবেজ যাচাই হচ্ছে...</span>
+                    </>
+                  ) : (
+                    <span>ডাটাবেজ যাচাই করে প্রবেশ করুন</span>
+                  )}
                 </button>
               </div>
             </form>
@@ -550,9 +602,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     <input
                       type="text"
                       value={newCodeInput}
-                      onChange={(e) => setNewCodeInput(e.target.value.toUpperCase())}
-                      placeholder="একক রেফারেল কোড (যেমন: NG-AB12CD34)"
-                      className="flex-1 min-w-[180px] h-9 px-3 rounded-xl bg-white dark:bg-[#1c1e24] border border-slate-300 dark:border-[#333745] font-mono text-xs font-bold text-slate-900 dark:text-white uppercase"
+                      onChange={(e) => setNewCodeInput(e.target.value.trim())}
+                      placeholder="একক রেফারেল কোড (যেমন: NG-ElOBvwzz)"
+                      className="flex-1 min-w-[180px] h-9 px-3 rounded-xl bg-white dark:bg-[#1c1e24] border border-slate-300 dark:border-[#333745] font-mono text-xs font-bold text-slate-900 dark:text-white"
                     />
                     <input
                       type="text"
@@ -827,9 +879,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
                     <button
                       type="submit"
-                      className="h-9 px-4 rounded-xl bg-[#0070e0] hover:bg-[#0060c0] text-white font-bold text-xs cursor-pointer shadow-xs"
+                      disabled={isUpdatingPasscode}
+                      className="h-9 px-4 rounded-xl bg-[#0070e0] hover:bg-[#0060c0] text-white font-bold text-xs cursor-pointer shadow-xs disabled:opacity-60 flex items-center gap-1.5"
                     >
-                      পাসওয়ার্ড পরিবর্তন করুন
+                      {isUpdatingPasscode ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>ডাটাবেজে সেভ হচ্ছে...</span>
+                        </>
+                      ) : (
+                        <span>ডাটাবেজে পাসওয়ার্ড সংরক্ষণ করুন</span>
+                      )}
                     </button>
                   </form>
 

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { RotateCw, Clock, ChevronDown, Check, Trophy } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
 import { NusukCode, CodeSort } from '../types';
 import { CodeCard } from './CodeCard';
 
@@ -27,88 +26,46 @@ function toBnDigits(num: number | string): string {
 }
 
 /**
- * Strictly synchronized relative timestamp for each card index.
- * Recalculates dynamically on EVERY single sudden cycle so code and time update
- * in 100% lockstep without any card having a static/frozen timestamp.
+ * Clean and stable relative timestamp in Bengali.
+ * Dynamically synchronized for the top 2 active rotating cards.
  */
-function getSynchronizedCardTime(idx: number, cycle: number): string {
-  // Card 0: Brand new drop
+function getBengaliTimeText(createdAt?: string, idx: number = 0, top2Cycle: number = 0): string {
   if (idx === 0) {
     const freshOptions = ['এখনই', '১ সেকেন্ড আগে', '২ সেকেন্ড আগে', '৩ সেকেন্ড আগে'];
-    return freshOptions[(cycle + idx) % freshOptions.length];
+    return freshOptions[top2Cycle % freshOptions.length];
   }
-
-  // Card 1: Recently rotated down (11s - 25s)
   if (idx === 1) {
-    const sec = 12 + ((cycle * 7 + 1) % 14); // 12 to 25 sec
+    const sec = 12 + ((top2Cycle * 7 + 1) % 15); // 12s - 26s
     return `${toBnDigits(sec)} সেকেন্ড আগে`;
   }
 
-  // Card 2: 32s - 55s
-  if (idx === 2) {
-    const sec = 32 + ((cycle * 11 + 3) % 24); // 32 to 55 sec
-    return `${toBnDigits(sec)} সেকেন্ড আগে`;
+  if (!createdAt) {
+    if (idx < 5) return `${toBnDigits(idx + 1)} মিনিট আগে`;
+    return `${toBnDigits(idx * 2)} মিনিট আগে`;
   }
 
-  // Card 3: 58s - 1m 25s
-  if (idx === 3) {
-    const sec = 58 + ((cycle * 5 + 4) % 30);
-    if (sec < 60) {
-      return `${toBnDigits(sec)} সেকেন্ড আগে`;
-    }
-    return `১ মিনিট ${toBnDigits(sec - 60)} সেকেন্ড আগে`;
+  const createdTime = new Date(createdAt).getTime();
+  if (isNaN(createdTime)) {
+    return 'কিছুক্ষণ আগে';
   }
 
-  // Card 4: ~2 minutes
-  if (idx === 4) {
-    const sec = 10 + ((cycle * 9 + 5) % 45);
-    return `২ মিনিট ${toBnDigits(sec)} সেকেন্ড আগে`;
+  const diffSec = Math.floor((Date.now() - createdTime) / 1000);
+  if (diffSec <= 10) return 'এখনই';
+  if (diffSec < 60) return `${toBnDigits(diffSec)} সেকেন্ড আগে`;
+
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${toBnDigits(diffMin)} মিনিট আগে`;
+
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) {
+    const remMin = diffMin % 60;
+    return remMin > 0
+      ? `${toBnDigits(diffHour)} ঘণ্টা ${toBnDigits(remMin)} মিনিট আগে`
+      : `${toBnDigits(diffHour)} ঘণ্টা আগে`;
   }
 
-  // Card 5: ~3-4 minutes
-  if (idx === 5) {
-    const mins = 3 + ((cycle + 1) % 2);
-    const sec = 15 + ((cycle * 13) % 40);
-    return `${toBnDigits(mins)} মিনিট ${toBnDigits(sec)} সেকেন্ড আগে`;
-  }
-
-  // Card 6: ~5-6 minutes
-  if (idx === 6) {
-    const mins = 5 + ((cycle * 2 + 1) % 2);
-    return `${toBnDigits(mins)} মিনিট আগে`;
-  }
-
-  // Card 7: ~7-8 minutes
-  if (idx === 7) {
-    const mins = 7 + ((cycle + 2) % 2);
-    return `${toBnDigits(mins)} মিনিট আগে`;
-  }
-
-  // Card 8: ~9-11 minutes
-  if (idx === 8) {
-    const mins = 9 + ((cycle * 3 + 1) % 3);
-    return `${toBnDigits(mins)} মিনিট আগে`;
-  }
-
-  // Card 9+: Scaled realistically with dynamic cycle jitter so deeper cards never freeze
-  const baseMinutes = 12 + (idx - 9) * 3;
-  const cycleJitter = ((cycle * 7 + idx * 3) % 4) - 1; // -1, 0, 1, 2
-  const totalMinutes = Math.max(12, baseMinutes + cycleJitter);
-
-  if (totalMinutes < 60) {
-    return `${toBnDigits(totalMinutes)} মিনিট আগে`;
-  }
-
-  const hours = Math.floor(totalMinutes / 60);
-  const remMinutes = totalMinutes % 60;
-  if (hours < 24) {
-    return remMinutes > 0
-      ? `${toBnDigits(hours)} ঘণ্টা ${toBnDigits(remMinutes)} মিনিট আগে`
-      : `${toBnDigits(hours)} ঘণ্টা আগে`;
-  }
-
-  const days = Math.floor(hours / 24);
-  return `${toBnDigits(days)} দিন আগে`;
+  const diffDays = Math.floor(diffHour / 24);
+  return `${toBnDigits(diffDays)} দিন আগে`;
 }
 
 export const LiveBoard: React.FC<LiveBoardProps> = ({
@@ -123,15 +80,27 @@ export const LiveBoard: React.FC<LiveBoardProps> = ({
   onRefresh,
   onCopy,
   onOpenNusuk,
-  onOpenNotWorkingModal,
-  onOpenBenefitModal,
 }) => {
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 100;
 
-  // Filter out pinned codes from main live board list
-  const unpinnedCodes = codes.filter((c) => !c.isPinned);
+  // Pagination state: Exactly 10 codes initial dashboard batch
+  const [visibleCount, setVisibleCount] = useState<number>(10);
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // Filter out pinned codes from main live board list & strictly deduplicate
+  const deduplicatedCodes = React.useMemo(() => {
+    const seen = new Set<string>();
+    const result: NusukCode[] = [];
+    for (const c of codes) {
+      if (!c || !c.code || c.isPinned) continue;
+      const clean = (c.normalizedCode || c.code).trim().toUpperCase();
+      if (!seen.has(clean)) {
+        seen.add(clean);
+        result.push(c);
+      }
+    }
+    return result;
+  }, [codes]);
 
   // Check whether a code was explicitly copied or clicked by THIS user
   const isCodeUsed = useCallback(
@@ -143,59 +112,49 @@ export const LiveBoard: React.FC<LiveBoardProps> = ({
     [userUsedCodes]
   );
 
+  const unpinnedCodes = deduplicatedCodes;
   const usedCodesCount = unpinnedCodes.filter(isCodeUsed).length;
 
-  // "ব্যবহৃত লুকান মানে ধুসর করে লেখা কেটে দেওয়া একদম হাইড না করা"
-  // Keep all unpinned codes in display list; used codes are grayed-out with a strikethrough cut line
-  const displayCodes = unpinnedCodes;
+  // Pool of codes eligible for streaming rotation on the first 2 cards:
+  // strictly excludes any code copied by this user so their used codes are never rotated into slot 0 or 1!
+  const unusedPool = React.useMemo(() => {
+    return deduplicatedCodes.filter((c) => !isCodeUsed(c));
+  }, [deduplicatedCodes, isCodeUsed]);
 
-  // Pool of codes eligible for top Card 0 fresh drop: strictly excludes any code copied by this user!
-  const unusedPool = unpinnedCodes.filter((c) => !isCodeUsed(c));
-  const poolToRotate = unusedPool.length > 0 ? unusedPool : unpinnedCodes;
+  const poolToRotate = unusedPool.length >= 2 ? unusedPool : deduplicatedCodes;
 
-  const totalPages = Math.ceil(displayCodes.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedCodes = displayCodes.slice(startIndex, startIndex + itemsPerPage);
-
-  // Dynamic Cycle State for top card 0 fresh drops
-  const [cycleIndex, setCycleIndex] = useState(0);
+  // Dynamic Cycle State specifically for the first 2 cards ("প্রথম ২ টা কার্ড ঝাপ্টি আপডেট")
+  const [top2Cycle, setTop2Cycle] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const pauseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const advanceCycle = useCallback(() => {
-    if (poolToRotate.length === 0) return;
-    setCycleIndex((prev) => prev + 1);
+  const advanceTop2Cycle = useCallback(() => {
+    if (poolToRotate.length <= 1) return;
+    setTop2Cycle((prev) => prev + 1);
   }, [poolToRotate.length]);
 
-  // Periodic sudden rotation: কোনো নির্দিষ্ট টাইম পরে না, যখন তখন হঠাৎ করে (unpredictable spontaneous bursts)
+  // Periodic natural jhapti update for the first 2 cards (spontaneous intervals: 6s - 10s)
   useEffect(() => {
-    if (unpinnedCodes.length === 0 || sort !== 'newest') return;
+    if (poolToRotate.length <= 1 || sort !== 'newest') return;
 
     let timeoutId: NodeJS.Timeout;
 
-    // Generates truly unpredictable intervals: "যখন তখন হঠাৎ করে"
-    const getSuddenRandomDelay = () => {
+    const getNaturalInterval = () => {
       const rand = Math.random();
-      if (rand < 0.28) {
-        // Sudden quick drop: 2.8s to 4.2s
-        return Math.floor(Math.random() * 1400) + 2800;
-      } else if (rand < 0.65) {
-        // Spontaneous normal update: 5.5s to 9s
-        return Math.floor(Math.random() * 3500) + 5500;
-      } else if (rand < 0.88) {
-        // Longer unexpected lull followed by sudden burst: 11s to 18s
-        return Math.floor(Math.random() * 7000) + 11000;
+      if (rand < 0.3) {
+        return Math.floor(Math.random() * 1400) + 4800; // 4.8s - 6.2s
+      } else if (rand < 0.75) {
+        return Math.floor(Math.random() * 2500) + 6800; // 6.8s - 9.3s
       } else {
-        // Ultra-rapid live flash: 1.8s to 2.5s
-        return Math.floor(Math.random() * 700) + 1800;
+        return Math.floor(Math.random() * 3000) + 10500; // 10.5s - 13.5s
       }
     };
 
     const scheduleNext = () => {
-      const delay = getSuddenRandomDelay();
+      const delay = getNaturalInterval();
       timeoutId = setTimeout(() => {
         if (!isPaused) {
-          advanceCycle();
+          advanceTop2Cycle();
         }
         scheduleNext();
       }, delay);
@@ -206,7 +165,7 @@ export const LiveBoard: React.FC<LiveBoardProps> = ({
     return () => {
       clearTimeout(timeoutId);
     };
-  }, [unpinnedCodes.length, sort, isPaused, advanceCycle]);
+  }, [poolToRotate.length, sort, isPaused, advanceTop2Cycle]);
 
   const handlePauseCycle = useCallback(() => {
     setIsPaused(true);
@@ -222,6 +181,48 @@ export const LiveBoard: React.FC<LiveBoardProps> = ({
       setIsPaused(false);
     }, 2000);
   }, []);
+
+  // Reset pagination to 10 when sort changes
+  useEffect(() => {
+    setVisibleCount(10);
+  }, [sort]);
+
+  // Sliced stable list: exactly 10 initial codes, then next 10 on scroll
+  const displayCodes = React.useMemo(() => {
+    return deduplicatedCodes.slice(0, visibleCount);
+  }, [deduplicatedCodes, visibleCount]);
+
+  const hasMore = visibleCount < deduplicatedCodes.length;
+
+  const loadNext10 = useCallback(() => {
+    setVisibleCount((prev) => {
+      if (prev >= deduplicatedCodes.length) return prev;
+      return Math.min(prev + 10, deduplicatedCodes.length);
+    });
+  }, [deduplicatedCodes.length]);
+
+  // Infinite scroll intersection observer: loads next 10 codes seamlessly
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    if (!sentinel || !hasMore) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          loadNext10();
+        }
+      },
+      {
+        rootMargin: '250px 0px',
+        threshold: 0.1,
+      }
+    );
+
+    observer.observe(sentinel);
+    return () => {
+      observer.disconnect();
+    };
+  }, [hasMore, loadNext10]);
 
   const sortLabels: Record<CodeSort, string> = {
     newest: 'নতুন আগে',
@@ -280,15 +281,15 @@ export const LiveBoard: React.FC<LiveBoardProps> = ({
           </button>
         </div>
 
-        {/* Row 2: কিভাবে সহজে বিজয় হব? (লাল বাটন) & নতুন আগে ▾ */}
+        {/* Row 2: কিভাবে সহজে বিজয় হব? (প্রিমিয়াম ট্রান্সপারেন্ট লাল বাটন) & নতুন আগে ▾ */}
         <div className="flex items-center gap-2 pt-2.5">
-          {/* Button 1: 🏆 কিভাবে সহজে বিজয় হব? (লাল বাটন - Red Button) */}
+          {/* Button 1: 🏆 কিভাবে সহজে বিজয় হব? (প্রিমিয়াম ট্রান্সপারেন্ট লাল বাটন - Premium Transparent Red Button) */}
           <button
             onClick={handleScrollToFooterGuide}
             title="নুসুক উমরাহ চ্যালেঞ্জে সহজে বিজয় হওয়ার পূর্ণাঙ্গ গাইড ও প্রশ্নোত্তর"
-            className="flex-1 min-w-0 h-8 sm:h-8.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white border border-rose-500 dark:border-rose-600 text-[11px] sm:text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap transition-all cursor-pointer active:scale-95 shadow-sm shadow-rose-600/30"
+            className="flex-1 min-w-0 h-8 sm:h-8.5 px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 active:bg-rose-500/30 dark:bg-rose-500/15 dark:hover:bg-rose-500/25 border border-rose-500/30 dark:border-rose-400/40 text-rose-600 dark:text-rose-400 text-[11px] sm:text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap transition-all cursor-pointer active:scale-95 shadow-xs backdrop-blur-xs"
           >
-            <Trophy className="w-3.5 h-3.5 text-amber-300 fill-amber-300 shrink-0" />
+            <Trophy className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 fill-amber-400/20 shrink-0" />
             <span className="truncate sm:overflow-visible">কিভাবে সহজে বিজয় হব?</span>
           </button>
 
@@ -336,7 +337,7 @@ export const LiveBoard: React.FC<LiveBoardProps> = ({
         </div>
       </div>
 
-      {/* 2. Standalone Independent Referral Code Cards Feed */}
+      {/* 2. Standalone Independent Referral Code Cards Feed (10 on load, 10 more on scroll) */}
       <div className="mt-3 space-y-3">
         {isLoading ? (
           <div className="space-y-3">
@@ -347,40 +348,27 @@ export const LiveBoard: React.FC<LiveBoardProps> = ({
               />
             ))}
           </div>
-        ) : paginatedCodes.length === 0 ? (
+        ) : displayCodes.length === 0 ? (
           <div className="rounded-2xl bg-white dark:bg-[#1c1e24] border border-slate-200/90 dark:border-[#2b2f3b] p-6 text-center text-xs text-slate-500 dark:text-neutral-400 shadow-sm">
             কোনো কোড পাওয়া যায়নি
           </div>
         ) : (
-          <AnimatePresence initial={false} mode="popLayout">
-            {paginatedCodes.map((item, idx) => {
-              // Only Card 0 (top latest drop) rotates through fresh unused codes
-              // All other cards (1, 2, 3...) stay 100% stable with their own actual codes!
-              const isFirstCard = idx === 0 && currentPage === 1;
+          <div className="space-y-3">
+            {displayCodes.map((item, idx) => {
+              const isFirstCard = idx === 0;
+              const isSecondCard = idx === 1;
+
+              // রেফারেল কোড এর প্রথম ২ টা কার্ড ঝাপ্টি আপডেট হবে, ৩য় কার্ড থেকে বাকি কার্ডগুলো সম্পূর্ণ স্থির থাকবে
               const resolvedItem =
-                isFirstCard && sort === 'newest' && poolToRotate.length > 0
-                  ? poolToRotate[cycleIndex % poolToRotate.length]
+                sort === 'newest' && poolToRotate.length > 1 && (isFirstCard || isSecondCard)
+                  ? poolToRotate[((idx - top2Cycle) % poolToRotate.length + poolToRotate.length) % poolToRotate.length]
                   : item;
 
-              const cardTimeText = getSynchronizedCardTime(idx, cycleIndex);
-              // A code is marked as used (grayed out + middle strike line) IF:
-              // 1. THIS user specifically copied/clicked it, AND
-              // 2. "ব্যবহৃত লুকান" is active (hideUsed === true)
+              const cardTimeText = getBengaliTimeText(resolvedItem.createdAt, idx, top2Cycle);
               const cardIsUsed = hideUsed && isCodeUsed(resolvedItem);
 
               return (
-                <motion.div
-                  key={`card-slot-${idx}`}
-                  layout="position"
-                  initial={{ opacity: 0, y: -16, scale: 0.98 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.96 }}
-                  transition={{
-                    duration: 0.35,
-                    ease: [0.16, 1, 0.3, 1],
-                    layout: { duration: 0.3, ease: 'easeOut' },
-                  }}
-                >
+                <div key={idx < 2 ? `top2-slot-${idx}` : (item.id || `card-${item.code}-${idx}`)} className="transition-opacity duration-200">
                   <CodeCard
                     codeItem={resolvedItem}
                     cardIndex={idx}
@@ -390,79 +378,32 @@ export const LiveBoard: React.FC<LiveBoardProps> = ({
                     isUsed={cardIsUsed}
                     onCopy={onCopy}
                     onOpenNusuk={onOpenNusuk}
-                    onTriggerNextCode={idx === 0 ? advanceCycle : undefined}
                     onPauseCycle={handlePauseCycle}
                     onResumeCycle={handleResumeCycle}
-                    cycleCount={isFirstCard ? cycleIndex : 0}
+                    cycleCount={top2Cycle}
                   />
-                </motion.div>
+                </div>
               );
             })}
-          </AnimatePresence>
+          </div>
         )}
       </div>
 
-      {/* 3. Pagination Controls (Shown when 100+ codes are loaded) */}
-      {totalPages > 1 && (
-        <div className="mt-5 p-3 rounded-2xl bg-white dark:bg-[#1c1e24] border border-slate-200/90 dark:border-[#2b2f3b] flex items-center justify-between gap-2 shadow-xs transition-colors">
-          {/* Previous Page */}
+      {/* 3. Infinite Scroll Sentinel / Load Next 10 Codes */}
+      {hasMore && (
+        <div ref={loadMoreSentinelRef} className="pt-3 pb-1 flex flex-col items-center justify-center">
           <button
-            onClick={() => {
-              setCurrentPage((p) => Math.max(1, p - 1));
-              window.scrollTo({ top: 320, behavior: 'smooth' });
-            }}
-            disabled={currentPage === 1}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              currentPage === 1
-                ? 'opacity-40 cursor-not-allowed bg-slate-100 dark:bg-[#20222a] text-slate-400 dark:text-neutral-500'
-                : 'bg-slate-100 hover:bg-slate-200 dark:bg-[#242730] dark:hover:bg-[#2c303c] text-slate-800 dark:text-white border border-slate-200 dark:border-[#363a48]'
-            }`}
+            onClick={loadNext10}
+            className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-xs sm:text-[13px] font-semibold bg-slate-100 hover:bg-slate-200/80 dark:bg-[#20232c] dark:hover:bg-[#282c38] text-slate-700 dark:text-neutral-300 border border-slate-200 dark:border-[#2e323e] transition-all cursor-pointer active:scale-98 shadow-xs flex items-center justify-center gap-2"
           >
-            « পূর্ববর্তী
-          </button>
-
-          {/* Page Indicators */}
-          <div className="flex items-center gap-1.5">
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNo) => (
-              <button
-                key={pageNo}
-                onClick={() => {
-                  setCurrentPage(pageNo);
-                  window.scrollTo({ top: 320, behavior: 'smooth' });
-                }}
-                className={`w-8 h-8 rounded-xl text-xs font-bold font-mono transition-all cursor-pointer ${
-                  currentPage === pageNo
-                    ? 'bg-[#0070e0] text-white shadow-xs'
-                    : 'bg-slate-100 dark:bg-[#20222a] text-slate-700 dark:text-neutral-300 hover:bg-slate-200 dark:hover:bg-[#282a34]'
-                }`}
-              >
-                {pageNo}
-              </button>
-            ))}
-          </div>
-
-          {/* Next Page */}
-          <button
-            onClick={() => {
-              setCurrentPage((p) => Math.min(totalPages, p + 1));
-              window.scrollTo({ top: 320, behavior: 'smooth' });
-            }}
-            disabled={currentPage === totalPages}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              currentPage === totalPages
-                ? 'opacity-40 cursor-not-allowed bg-slate-100 dark:bg-[#20222a] text-slate-400 dark:text-neutral-500'
-                : 'bg-slate-100 hover:bg-slate-200 dark:bg-[#242730] dark:hover:bg-[#2c303c] text-slate-800 dark:text-white border border-slate-200 dark:border-[#363a48]'
-            }`}
-          >
-            পরবর্তী »
+            <span>পরবর্তী ১০টি কোড লোড করুন</span>
+            <span className="text-[11px] text-slate-400 dark:text-neutral-400 font-normal">
+              (বাকি {toBnDigits(deduplicatedCodes.length - visibleCount)}টি)
+            </span>
           </button>
         </div>
       )}
-
-      {/* Total Codes Counter Badge */}
-      <div className="mt-2.5 text-center text-[11px] text-slate-400 dark:text-neutral-500 font-mono">
-        মোট {displayCodes.length}টি কোড • পৃষ্ঠা {currentPage}/{totalPages || 1}
-      </div>
     </div>
   );
 };
+
