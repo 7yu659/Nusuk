@@ -85,7 +85,6 @@ export const LiveBoard: React.FC<LiveBoardProps> = ({
 
   // Pagination state: Exactly 10 codes initial dashboard batch
   const [visibleCount, setVisibleCount] = useState<number>(10);
-  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
 
   // Filter out pinned codes from main live board list & strictly deduplicate
   const deduplicatedCodes = React.useMemo(() => {
@@ -201,28 +200,6 @@ export const LiveBoard: React.FC<LiveBoardProps> = ({
     });
   }, [deduplicatedCodes.length]);
 
-  // Infinite scroll intersection observer: loads next 10 codes seamlessly
-  useEffect(() => {
-    const sentinel = loadMoreSentinelRef.current;
-    if (!sentinel || !hasMore) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          loadNext10();
-        }
-      },
-      {
-        rootMargin: '250px 0px',
-        threshold: 0.1,
-      }
-    );
-
-    observer.observe(sentinel);
-    return () => {
-      observer.disconnect();
-    };
-  }, [hasMore, loadNext10]);
 
   const sortLabels: Record<CodeSort, string> = {
     newest: 'নতুন আগে',
@@ -389,17 +366,15 @@ export const LiveBoard: React.FC<LiveBoardProps> = ({
         )}
       </div>
 
-      {/* 3. Infinite Scroll Sentinel / Load Next 10 Codes */}
+      {/* 3. Load Next 10 Codes Button */}
       {hasMore && (
-        <div ref={loadMoreSentinelRef} className="pt-3 pb-1 flex flex-col items-center justify-center">
+        <div className="pt-3 pb-2 flex flex-col items-center justify-center">
           <button
             onClick={loadNext10}
-            className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-xs sm:text-[13px] font-semibold bg-slate-100 hover:bg-slate-200/80 dark:bg-[#20232c] dark:hover:bg-[#282c38] text-slate-700 dark:text-neutral-300 border border-slate-200 dark:border-[#2e323e] transition-all cursor-pointer active:scale-98 shadow-xs flex items-center justify-center gap-2"
+            className="w-full sm:w-auto min-w-[280px] px-6 py-3 rounded-2xl text-xs sm:text-[13px] font-bold text-slate-800 dark:text-neutral-100 bg-white hover:bg-slate-50 dark:bg-[#1c1e24] dark:hover:bg-[#232630] border border-slate-200/90 dark:border-[#2b2f3b] hover:border-blue-500/40 dark:hover:border-sky-400/40 shadow-sm shadow-slate-900/5 dark:shadow-black/25 transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-2 group"
           >
-            <span>পরবর্তী ১০টি কোড লোড করুন</span>
-            <span className="text-[11px] text-slate-400 dark:text-neutral-400 font-normal">
-              (বাকি {toBnDigits(deduplicatedCodes.length - visibleCount)}টি)
-            </span>
+            <span>পরবর্তি ১০ টি কোড দেখতে ক্লিক করুন</span>
+            <ChevronDown className="w-4 h-4 text-blue-600 dark:text-sky-400 group-hover:translate-y-0.5 transition-transform shrink-0" />
           </button>
         </div>
       )}
