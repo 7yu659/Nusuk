@@ -235,53 +235,6 @@ let appSettings: AppSettings = {
   },
 };
 
-// Ensure healthy pool of ~415 authentic Nusuk codes
-function ensureHealthyPool() {
-  if (codesDatabase.length >= 415) return;
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
-  const names = [
-    'মাহমুদুল হাসান', 'তানজিলা আক্তার', 'আব্দুল্লাহ আল-মামুন', 'নুহা শেখ', 'তাসমিয়া আজাদ',
-    'জুবায়ের বিন জাইদ', 'তানহা হোসাইন', 'কাজী রায়হান', 'সাইফুল ইসলাম', 'হাবিবুর রহমান',
-    'সালমান ফারসি', 'হাসিবুর রহমান', 'আরিফুল হক', 'মুজাহিদুল ইসলাম', 'তাহমিদ জামান',
-    'শামিম রেজা', 'নাঈমুল ইসলাম', 'মেহরাব হোসেন', 'ফারহানা ইয়াসমিন', 'সাদিয়া আফরিন',
-    'খালিদ হাসান', 'জাহিদুল ইসলাম', 'তারেক মাহমুদ', 'শামীমা নাসরিন', 'ইমরান খান',
-    'বিল্লাল হোসাইন', 'রোকসানা আক্তার', 'তানভীর আহমেদ', 'নাজমুল হুদা', 'শহিদুল ইসলাম',
-    'আশরাফুল আলম', 'রেদোয়ান করিম', 'মুস্তাকিম বিল্লাহ', 'আব্দুর রহিম', 'ফাহিম ফয়সাল',
-    'লুৎফর রহমান', 'আতিকুর রহমান', 'মাহবুব আলম', 'কামরুল হাসান', 'মোশাররফ করিম'
-  ];
-  const existingMap = new Map(codesDatabase.map((c) => [(c.normalizedCode || c.code).trim().toUpperCase(), c]));
-  let counter = codesDatabase.length;
-  const now = Date.now();
-  while (codesDatabase.length < 415) {
-    let randCode = 'NG-';
-    for (let i = 0; i < 8; i++) {
-      randCode += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    const norm = randCode.toUpperCase();
-    if (existingMap.has(norm)) continue;
-    const name = names[counter % names.length];
-    const minutesAgo = 4 + (counter * 3) + Math.floor(Math.random() * 5);
-    const copies = Math.floor(Math.random() * 45) + (counter % 3 === 0 ? 50 : 2);
-    const status = counter % 4 === 0 ? 'verified' : (counter % 3 === 0 ? 'recent' : 'available');
-    const entity: NusukCodeEntity = {
-      id: `code-seed-${counter}-${Date.now().toString(36)}`,
-      code: randCode,
-      normalizedCode: norm,
-      nickname: name,
-      status: status as any,
-      copyCount: copies,
-      reportCount: 0,
-      isPinned: false,
-      createdAt: new Date(now - minutesAgo * 60 * 1000).toISOString(),
-      updatedAt: new Date(now - minutesAgo * 60 * 1000).toISOString(),
-      reports: []
-    };
-    codesDatabase.push(entity);
-    existingMap.set(norm, entity);
-    counter++;
-  }
-}
-
 // Initialize or load database
 function loadDatabase() {
   try {
@@ -312,8 +265,6 @@ function loadDatabase() {
         codesDatabase = uniqueCodes;
         totalVisitsCounter = parsed.totalVisits || 1480;
 
-        ensureHealthyPool();
-
         // If all codes are older than 10 minutes, stagger the newest ones relative to now
         const now = Date.now();
         const firstUnpinned = codesDatabase.find((c) => !c.isPinned);
@@ -335,7 +286,6 @@ function loadDatabase() {
     console.error('Error reading database file, loading seed:', err);
   }
   codesDatabase = [...INITIAL_CODES];
-  ensureHealthyPool();
   saveDatabase();
 }
 
@@ -428,18 +378,8 @@ async function initDatabaseEngine() {
     } else {
       const remoteCodes = await adapter.getAllCodes();
       if (Array.isArray(remoteCodes) && remoteCodes.length > 0) {
-        const existingMap = new Map(codesDatabase.map((c) => [(c.normalizedCode || c.code).trim().toUpperCase(), c]));
-        let hasChanges = false;
-        for (const item of remoteCodes) {
-          if (!item || !item.code) continue;
-          const norm = (item.normalizedCode || item.code).trim().toUpperCase();
-          if (!existingMap.has(norm)) {
-            codesDatabase.unshift(item);
-            existingMap.set(norm, item);
-            hasChanges = true;
-          }
-        }
-        if (hasChanges) saveDatabase();
+        codesDatabase = remoteCodes;
+        saveDatabase();
       }
     }
   } catch (err) {
