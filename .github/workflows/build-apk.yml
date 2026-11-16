@@ -1,0 +1,51 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK Platform 35 and Build Tools
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Compile and sign APK
+        run: |
+          PLATFORM="$ANDROID_HOME/platforms/android-35/android.jar"
+          TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+
+          mkdir -p build/gen build/classes
+
+          "$TOOLS/aapt2" compile --dir res -o build/res.zip
+          "$TOOLS/aapt2" link --min-sdk-version 26 --target-sdk-version 35 -I "$PLATFORM" \
+            --manifest AndroidManifest.xml --java build/gen -A assets -o build/unaligned.apk build/res.zip
+
+          javac -source 17 -target 17 -cp "$PLATFORM" -d build/classes $(find build/gen src -name "*.java")
+          "$TOOLS/d8" --lib "$PLATFORM" --output build $(find build/classes -name "*.class")
+          (cd build && zip -q unaligned.apk classes*.dex)
+
+          "$TOOLS/zipalign" -f -p 4 build/unaligned.apk build/aligned.apk
+          keytool -genkeypair -keystore build/debug.keystore -storepass android -keypass android -alias debug \
+            -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Ebrahim Khalil"
+          "$TOOLS/apksigner" sign --ks build/debug.keystore --ks-pass pass:android \
+            --out build/nusuk-auto.apk build/aligned.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nusuk-auto-apk
+          path: build/nusuk-auto.apk
