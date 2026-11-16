@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android" android:opacity="opaque">
+    <item><shape><gradient android:angle="315" android:startColor="#14532D" android:centerColor="#15803D" android:endColor="#16A34A" /></shape></item>
+    <item android:gravity="center" android:width="104dp" android:height="104dp" android:drawable="@drawable/ic_logo" />
+</layer-list>
