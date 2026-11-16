@@ -23,29 +23,60 @@ jobs:
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Compile and sign APK
+      - name: Locate Android project and compile APK
         run: |
+          set -e
+          ROOT_DIR=""
+          MANIFEST_PATH="$(find . -maxdepth 4 -name "AndroidManifest.xml" -not -path "./build*" -not -path "./node_modules/*" | head -n 1 || true)"
+
+          if [ -z "$MANIFEST_PATH" ]; then
+            ZIP_FILE="$(find . -maxdepth 2 -name "*.zip" | head -n 1 || true)"
+            if [ -n "$ZIP_FILE" ]; then
+              echo "Extracting uploaded archive: $ZIP_FILE"
+              mkdir -p _unzipped
+              unzip -q -o "$ZIP_FILE" -d _unzipped
+              MANIFEST_PATH="$(find _unzipped -maxdepth 4 -name "AndroidManifest.xml" | head -n 1 || true)"
+            fi
+          fi
+
+          if [ -z "$MANIFEST_PATH" ]; then
+            echo "ERROR: AndroidManifest.xml not found! Repository contents:"
+            ls -la
+            exit 1
+          fi
+
+          ROOT_DIR="$(cd "$(dirname "$MANIFEST_PATH")" && pwd)"
+          echo "Detected Android project root: $ROOT_DIR"
+
+          if [ ! -d "$ROOT_DIR/res" ] || [ ! -d "$ROOT_DIR/src" ]; then
+            echo "ERROR: Missing 'res' or 'src' directory inside $ROOT_DIR:"
+            ls -la "$ROOT_DIR"
+            exit 1
+          fi
+
           PLATFORM="$ANDROID_HOME/platforms/android-35/android.jar"
           TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          OUT="$GITHUB_WORKSPACE/build-out"
 
-          mkdir -p build/gen build/classes
+          mkdir -p "$OUT/gen" "$OUT/classes"
+          cd "$ROOT_DIR"
 
-          "$TOOLS/aapt2" compile --dir res -o build/res.zip
+          "$TOOLS/aapt2" compile --dir res -o "$OUT/res.zip"
           "$TOOLS/aapt2" link --min-sdk-version 26 --target-sdk-version 35 -I "$PLATFORM" \
-            --manifest AndroidManifest.xml --java build/gen -A assets -o build/unaligned.apk build/res.zip
+            --manifest AndroidManifest.xml --java "$OUT/gen" -A assets -o "$OUT/unaligned.apk" "$OUT/res.zip"
 
-          javac -source 17 -target 17 -cp "$PLATFORM" -d build/classes $(find build/gen src -name "*.java")
-          "$TOOLS/d8" --lib "$PLATFORM" --output build $(find build/classes -name "*.class")
-          (cd build && zip -q unaligned.apk classes*.dex)
+          javac -source 17 -target 17 -cp "$PLATFORM" -d "$OUT/classes" $(find "$OUT/gen" src -name "*.java")
+          "$TOOLS/d8" --lib "$PLATFORM" --output "$OUT" $(find "$OUT/classes" -name "*.class")
+          (cd "$OUT" && zip -q unaligned.apk classes*.dex)
 
-          "$TOOLS/zipalign" -f -p 4 build/unaligned.apk build/aligned.apk
-          keytool -genkeypair -keystore build/debug.keystore -storepass android -keypass android -alias debug \
+          "$TOOLS/zipalign" -f -p 4 "$OUT/unaligned.apk" "$OUT/aligned.apk"
+          keytool -genkeypair -keystore "$OUT/debug.keystore" -storepass android -keypass android -alias debug \
             -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Ebrahim Khalil"
-          "$TOOLS/apksigner" sign --ks build/debug.keystore --ks-pass pass:android \
-            --out build/nusuk-auto.apk build/aligned.apk
+          "$TOOLS/apksigner" sign --ks "$OUT/debug.keystore" --ks-pass pass:android \
+            --out "$OUT/nusuk-auto.apk" "$OUT/aligned.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: nusuk-auto-apk
-          path: build/nusuk-auto.apk
+          path: build-out/nusuk-auto.apk
