@@ -1,0 +1,98 @@
+package com.nusuk.automator.codes;
+
+import android.content.Context;
+import android.util.Log;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+
+import com.nusuk.automator.R;
+import com.nusuk.automator.core.Http;
+
+/**
+ * The APK ships without codes: this pulls the list from the server (/api/app/codes) in pages,
+ * resuming from the cursor saved with the list. Runs on the first open, and again (cheaply: only
+ * keys newer than the cursor) whenever the app is opened after a few hours.
+ */
+public final class CodeDownloader {
+    private static final String TAG = "CodeDownloader";
+    private static final long RECHECK_MS = 6 * 60 * 60 * 1000L;
+
+    public static volatile boolean running = false;
+    public static volatile boolean failed = false;
+    public static volatile int serverTotal = 0;
+    public static volatile Runnable onProgress; // set by the screen that shows progress (any thread)
+    private static volatile long lastDone = 0;
+
+    private CodeDownloader() {}
+
+    /** Starts a download if the list is empty, or the last full check is old. `force` skips the age check. */
+    public static synchronized void start(Context ctx, boolean force) {
+        if (running) return;
+        Context app = ctx.getApplicationContext();
+        KeyRepository repo = KeyRepository.getInstance(app);
+        if (!repo.isLoaded()) { // saved list still loading: decide once it is (else it looks empty)
+            repo.whenLoaded(() -> start(app, force));
+            return;
+        }
+        boolean empty = repo.getTotalCount() == 0;
+        if (!force && !empty && System.currentTimeMillis() - lastDone < RECHECK_MS) return;
+        running = true;
+        failed = false;
+        changed();
+        new Thread(() -> run(app, repo), "code-download").start();
+    }
+
+    private static void run(Context ctx, KeyRepository repo) {
+        try {
+            long after = repo.codesCursor();
+            while (true) {
+                JSONObject r = post(ctx, after);
+                JSONArray arr = r.optJSONArray("codes");
+                List<String> page = new ArrayList<>();
+                if (arr != null) {
+                    for (int i = 0; i < arr.length(); i++) {
+                        if (arr.isNull(i)) continue;
+                        String s = arr.optString(i, "").trim();
+                        if (!s.isEmpty() && !"null".equalsIgnoreCase(s)) page.add(s);
+                    }
+                }
+                long last = r.optLong("last", after);
+                serverTotal = r.optInt("total", serverTotal);
+                repo.appendCodes(page, last);
+                after = last;
+                changed();
+                if (r.optBoolean("done", true) || page.isEmpty()) break;
+            }
+            lastDone = System.currentTimeMillis();
+            Log.i(TAG, "Code list up to date: " + repo.getTotalCount() + " codes");
+        } catch (Exception e) {
+            Log.w(TAG, "Code download failed", e);
+            failed = true;
+        } finally {
+            running = false;
+            changed();
+        }
+    }
+
+    private static void changed() {
+        Runnable r = onProgress;
+        if (r != null) r.run();
+    }
+
+    private static JSONObject post(Context ctx, long after) throws Exception {
+        Http.Response r = Http.postJson(ctx, "/api/app/codes", new JSONObject().put("after", after), 10_000, 30_000);
+        if (r.status != 200) throw new Exception("HTTP " + r.status);
+        return new JSONObject(r.body);
+    }
+}

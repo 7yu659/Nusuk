@@ -1,0 +1,605 @@
+package com.nusuk.automator.overlay;
+
+import android.app.Service;
+import android.content.Intent;
+import android.graphics.PixelFormat;
+import android.os.Build;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Looper;
+import android.util.DisplayMetrics;
+import android.util.Log;
+import android.view.*;
+import android.widget.*;
+
+import com.nusuk.automator.R;
+import com.nusuk.automator.automation.AutomationService;
+import com.nusuk.automator.codes.KeyRepository;
+import com.nusuk.automator.core.L;
+import com.nusuk.automator.quiz.QuizPace;
+
+public class OverlayService extends Service implements AutomationService.AutomationListener, KeyRepository.ChangeListener {
+    private static final String TAG = "OverlayService";
+    private static OverlayService instance;
+    private static volatile boolean appOpen = false;
+
+    /** Nusuk Auto's own screens are on top: the floating widget hides there and comes back when they leave. */
+    public static void setAppOpen(boolean open) {
+        appOpen = open;
+        OverlayService s = instance;
+        if (s != null) s.mainHandler.post(s::applyHidden);
+    }
+
+    private void applyHidden() {
+        if (overlayView != null) overlayView.setVisibility(appOpen ? View.GONE : View.VISIBLE);
+        publishCover();
+    }
+
+    public static OverlayService getInstance() {
+        return instance;
+    }
+
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    private WindowManager windowManager;
+    private View overlayView;
+    private WindowManager.LayoutParams params;
+
+    private View overlayPanel;
+    private View overlayBadge;
+    private View overlayHeader;
+
+    private TextView tvProgress;
+    private TextView tvOverlayStatus;
+    private TextView tvBadgeCount;
+
+    private Button btnModeCodes;
+    private Button btnModeQuiz;
+    private Button btnCountMinus;
+    private Button btnCountPlus;
+    private EditText etCount;
+    private Button btnAction;
+    private View rowPace, rowMode, rowCount;
+    private Button btnPause;
+    private View btnClose;
+    private boolean runningUi = false;
+    private View btnPace;
+    private boolean moveQueued = false;
+    private static final int DEFAULT_BATCH = 300, MIN_BATCH = 1, MAX_BATCH = 8000, STEP = 10;
+
+    private AutomationService.AutomationMode selectedMode = AutomationService.AutomationMode.CODES;
+    private int selectedBatchCount = DEFAULT_BATCH;
+    private float initialX, initialY;
+    private int initialTouchX, initialTouchY;
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        instance = this;
+        initOverlayView();
+        KeyRepository.getInstance(this).registerListener(this);
+        ensureServiceListener();
+    }
+
+    public void ensureServiceListener() {
+        AutomationService service = AutomationService.getInstance();
+        if (service != null) {
+            service.registerListener(this);
+        }
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        ensureServiceListener();
+        if (intent != null) {
+            String action = intent.getAction();
+            if ("STOP".equals(action)) {
+                stopSelf();
+                return START_NOT_STICKY;
+            } else if ("SET_MODE".equals(action)) {
+                if ("QUIZ".equalsIgnoreCase(intent.getStringExtra("mode"))) {
+                    selectMode(AutomationService.AutomationMode.QUIZ);
+                } else {
+                    selectMode(AutomationService.AutomationMode.CODES);
+                }
+                expand();
+            }
+        }
+        updateUiStats();
+        return START_STICKY;
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        instance = null;
+        coverShown = false;
+        KeyRepository.getInstance(this).unregisterListener(this);
+        AutomationService service = AutomationService.getInstance();
+        if (service != null) {
+            service.unregisterListener(this);
+        }
+
+        if (windowManager != null && overlayView != null) {
+            try {
+                windowManager.removeView(overlayView);
+            } catch (Exception e) {
+                Log.e(TAG, "Error removing view", e);
+            }
+        }
+    }
+
+    private void initOverlayView() {
+        windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+        // The panel has fixed-height rows: a phone's large font size would clip its labels, so it
+        // is drawn at the normal font scale (Display size still applies).
+        android.content.res.Configuration cfg = new android.content.res.Configuration(getResources().getConfiguration());
+        cfg.fontScale = 1f;
+        LayoutInflater inflater = LayoutInflater.from(createConfigurationContext(cfg));
+        overlayView = inflater.inflate(R.layout.overlay_layout, null);
+        L.view(this, overlayView);
+
+        int layoutType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
+
+        params = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                layoutType,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+        );
+
+        params.gravity = Gravity.TOP | Gravity.START;
+        params.x = 40;
+        params.y = 140;
+
+        overlayPanel = overlayView.findViewById(R.id.overlayPanel);
+        overlayBadge = overlayView.findViewById(R.id.overlayBadge);
+        overlayHeader = overlayView.findViewById(R.id.overlayHeader);
+
+        tvProgress = overlayView.findViewById(R.id.tvProgress);
+        tvOverlayStatus = overlayView.findViewById(R.id.tvOverlayStatus);
+        thinkBar = overlayView.findViewById(R.id.thinkBar);
+        tvBadgeCount = overlayView.findViewById(R.id.tvBadgeCount);
+
+        btnModeCodes = overlayView.findViewById(R.id.btnModeCodes);
+        btnModeQuiz = overlayView.findViewById(R.id.btnModeQuiz);
+
+        btnCountMinus = overlayView.findViewById(R.id.btnCountMinus);
+        btnCountPlus = overlayView.findViewById(R.id.btnCountPlus);
+        etCount = overlayView.findViewById(R.id.etCount);
+        btnAction = overlayView.findViewById(R.id.btnAction);
+        rowPace = overlayView.findViewById(R.id.rowPace);
+        rowMode = overlayView.findViewById(R.id.rowMode);
+        rowCount = overlayView.findViewById(R.id.rowCount);
+        btnPause = overlayView.findViewById(R.id.btnPause);
+        btnPause.setOnClickListener(v -> {
+            AutomationService s = AutomationService.getInstance();
+            if (s != null && s.isRunning()) s.pauseAutomation(); // toggles; the label follows onProgress
+        });
+        btnPace = overlayView.findViewById(R.id.btnPace);
+        rowPace.setOnClickListener(v -> {
+            QuizPace.setOn(this, !QuizPace.isOn(this));
+            renderPace();
+        });
+        renderPace();
+
+        btnModeCodes.setOnClickListener(v -> selectMode(AutomationService.AutomationMode.CODES));
+        btnModeQuiz.setOnClickListener(v -> selectMode(AutomationService.AutomationMode.QUIZ));
+
+        holdToStep(btnCountMinus, -1);
+        holdToStep(btnCountPlus, 1);
+
+        // The overlay is not focusable (so it never steals focus from the quiz app). Only while
+        // the user types in the count box do we make it focusable so the keyboard can open.
+        etCount.setOnTouchListener((v, event) -> {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) setWindowFocusable(true);
+            return false;
+        });
+        etCount.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus) {
+                v.post(() -> {
+                    android.view.inputmethod.InputMethodManager imm =
+                            (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                    if (imm != null) imm.showSoftInput(v, 0);
+                });
+            } else {
+                commitCountInput();
+            }
+        });
+        etCount.setOnEditorActionListener((v, actionId, event) -> {
+            commitCountInput();
+            return true;
+        });
+
+        btnAction.setOnClickListener(v -> {
+            commitCountInput();
+            ensureServiceListener();
+            AutomationService s = AutomationService.getInstance();
+            if (s == null) {
+                // Usually the switch is still on but Android stopped the service: turning it off
+                // and on reconnects it. Open the screen so it's one step away.
+                Toast.makeText(this, L.t(this, "Nusuk Auto isn't connected. In Accessibility, turn Nusuk Auto off and on again."), Toast.LENGTH_LONG).show();
+                try {
+                    startActivity(new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (Exception ignored) {}
+                return;
+            }
+
+            s.registerListener(this);
+            if (s.isRunning()) {
+                s.stopAutomation("Stopped by user");
+            } else {
+                s.startAutomation(selectedBatchCount, selectedMode);
+            }
+        });
+
+        View btnMin = overlayView.findViewById(R.id.btnMinimize);
+        if (btnMin != null) btnMin.setOnClickListener(v -> { commitCountInput(); minimize(); });
+        if (overlayBadge != null) overlayBadge.setOnClickListener(v -> expand());
+        btnClose = overlayView.findViewById(R.id.btnClose);
+        if (btnClose != null) btnClose.setOnClickListener(v -> stopSelf());
+
+        // Draggable touch handling on Header and Badge. A touch that barely moves is a
+        // tap: it is passed on as a click (tapping the badge re-opens the full panel).
+        final int touchSlop = ViewConfiguration.get(this).getScaledTouchSlop();
+        final boolean[] dragging = {false};
+        View.OnTouchListener dragListener = (v, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    initialX = params.x;
+                    initialY = params.y;
+                    initialTouchX = (int) event.getRawX();
+                    initialTouchY = (int) event.getRawY();
+                    dragging[0] = false;
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    int dx = (int) (event.getRawX() - initialTouchX);
+                    int dy = (int) (event.getRawY() - initialTouchY);
+                    if (!dragging[0] && Math.hypot(dx, dy) < touchSlop) return true;
+                    dragging[0] = true;
+                    params.x = (int) (initialX + dx);
+                    params.y = (int) (initialY + dy);
+                    // At most one window update per frame: touch events come faster than the screen draws.
+                    if (!moveQueued) {
+                        moveQueued = true;
+                        overlayView.postOnAnimation(() -> {
+                            moveQueued = false;
+                            try { windowManager.updateViewLayout(overlayView, params); } catch (Exception ignored) {}
+                        });
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    if (!dragging[0]) v.performClick();
+                    return true;
+            }
+            return false;
+        };
+
+        if (overlayHeader != null) overlayHeader.setOnTouchListener(dragListener);
+        if (overlayBadge != null) overlayBadge.setOnTouchListener(dragListener);
+
+        windowManager.addView(overlayView, params);
+        overlayView.getViewTreeObserver().addOnPreDrawListener(() -> { publishCover(); return true; });
+        applyHidden();
+        selectMode(AutomationService.AutomationMode.QUIZ); // Default to Quiz since it's the active focus
+        selectBatch(savedBatch());
+        updateUiStats();
+    }
+
+    private void setWindowFocusable(boolean on) {
+        if (params == null || overlayView == null) return;
+        boolean has = (params.flags & WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0;
+        if (on == has) return;
+        if (on) params.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        else params.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        try {
+            windowManager.updateViewLayout(overlayView, params);
+        } catch (Exception e) {
+            Log.e(TAG, "setWindowFocusable failed", e);
+        }
+    }
+
+    /** Applies what was typed in the count box, closes the keyboard and returns focus to the app below. */
+    private void commitCountInput() {
+        if (etCount == null) return;
+        int n = selectedBatchCount;
+        try {
+            // Digit-by-digit so Bengali digits, "", "0" and "00" can never throw.
+            String t = etCount.getText().toString().trim();
+            int v = 0, digits = 0;
+            for (int i = 0; i < t.length(); i++) {
+                int d = Character.digit(t.charAt(i), 10);
+                if (d >= 0) { v = v * 10 + d; digits++; }
+            }
+            if (digits > 0) n = v;
+        } catch (RuntimeException ignored) {}
+        try {
+            selectBatch(n);
+            etCount.clearFocus();
+            android.view.inputmethod.InputMethodManager imm =
+                    (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null) imm.hideSoftInputFromWindow(etCount.getWindowToken(), 0);
+            setWindowFocusable(false);
+        } catch (RuntimeException e) {
+            Log.e(TAG, "commitCountInput failed", e);
+        }
+    }
+
+    /** While a run is going only the status, progress and Pause/Stop show; the setup rows come back after. */
+    private void setRunningUi(boolean running) {
+        if (runningUi == running) return;
+        runningUi = running;
+        int setup = running ? View.GONE : View.VISIBLE;
+        if (rowMode != null) rowMode.setVisibility(setup);
+        if (rowCount != null) rowCount.setVisibility(setup);
+        if (rowPace != null) rowPace.setVisibility(running || selectedMode != AutomationService.AutomationMode.QUIZ ? View.GONE : View.VISIBLE);
+        if (btnPause != null) btnPause.setVisibility(running ? View.VISIBLE : View.GONE);
+        if (btnClose != null) btnClose.setVisibility(running ? View.GONE : View.VISIBLE); // only minimize while running
+    }
+
+    private void setActionIdle() {
+        setRunningUi(false);
+        if (btnAction == null) return;
+        btnAction.setText(L.t(this, selectedMode == AutomationService.AutomationMode.QUIZ ? "▶  Start quiz" : "▶  Start codes"));
+        btnAction.setBackgroundResource(R.drawable.ov_start_btn);
+        btnAction.setTextColor(0xFF0F2E1E);
+    }
+
+    private void setActionRunning() {
+        setRunningUi(true);
+        AutomationService s = AutomationService.getInstance();
+        if (btnPause != null) btnPause.setText(L.t(this, s != null && s.isPaused() ? "▶  Resume" : "❚❚  Pause"));
+        if (btnAction == null) return;
+        btnAction.setText(L.t(this, "■  Stop"));
+        btnAction.setBackgroundResource(R.drawable.button_stop);
+        btnAction.setTextColor(0xFFFFFFFF);
+    }
+
+    private void selectMode(AutomationService.AutomationMode mode) {
+        selectedMode = mode;
+        boolean isCodes = (mode == AutomationService.AutomationMode.CODES);
+        if (btnModeCodes != null) {
+            btnModeCodes.setBackgroundResource(isCodes ? R.drawable.chip_selected : R.drawable.chip_unselected);
+            btnModeCodes.setTextColor(isCodes ? 0xFFFFFFFF : 0xFFA7F3D0);
+        }
+        if (btnModeQuiz != null) {
+            btnModeQuiz.setBackgroundResource(!isCodes ? R.drawable.chip_selected : R.drawable.chip_unselected);
+            btnModeQuiz.setTextColor(!isCodes ? 0xFFFFFFFF : 0xFFA7F3D0);
+        }
+        if (rowPace != null) rowPace.setVisibility(isCodes || runningUi ? View.GONE : View.VISIBLE);
+
+        updateUiStats();
+    }
+
+    private void renderPace() {
+        if (btnPace == null) return;
+        boolean on = QuizPace.isOn(this);
+        btnPace.setBackgroundResource(on ? R.drawable.ov_switch_on : R.drawable.ov_switch_off);
+        rowPace.setContentDescription(L.t(this, "Quiz pace: " + L.t(this, on ? "Normal" : "Fast")));
+    }
+
+    private int savedBatch() {
+        try { return getSharedPreferences("overlay", MODE_PRIVATE).getInt("batch", DEFAULT_BATCH); }
+        catch (RuntimeException e) { return DEFAULT_BATCH; }
+    }
+
+    /** Tap = one step; hold = repeats, speeding up (10 → 50 → 200 per tick). */
+    private void holdToStep(View v, int dir) {
+        final Runnable[] tick = new Runnable[1];
+        final int[] n = {0};
+        tick[0] = () -> {
+            n[0]++;
+            int step = n[0] > 30 ? 200 : n[0] > 12 ? 50 : STEP;
+            selectBatch(selectedBatchCount + dir * step, false);
+            mainHandler.postDelayed(tick[0], n[0] > 12 ? 60 : 120);
+        };
+        v.setOnTouchListener((view, e) -> {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    commitCountInput();
+                    n[0] = 0;
+                    view.setPressed(true);
+                    tick[0].run();
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    mainHandler.removeCallbacks(tick[0]);
+                    view.setPressed(false);
+                    saveBatch(selectedBatchCount);
+                    return true;
+            }
+            return true;
+        });
+    }
+
+    private void saveBatch(int count) {
+        try { getSharedPreferences("overlay", MODE_PRIVATE).edit().putInt("batch", count).apply(); } catch (RuntimeException ignored) {}
+    }
+
+    private void selectBatch(int count) {
+        selectBatch(count, true);
+    }
+
+    /** persist=false while a +/- button is held (ticks every ~60 ms); the value is saved on release. */
+    private void selectBatch(int count, boolean persist) {
+        count = Math.max(MIN_BATCH, Math.min(MAX_BATCH, count));
+        selectedBatchCount = count;
+        if (persist) saveBatch(count);
+        if (etCount != null && !L.t(this, String.valueOf(count)).contentEquals(etCount.getText())) {
+            etCount.setText(L.t(this, String.valueOf(count)));
+            etCount.setSelection(etCount.getText().length());
+        }
+
+        AutomationService s = AutomationService.getInstance();
+        if (s == null || !s.isRunning()) {
+            if (tvProgress != null) tvProgress.setText(L.t(this, "0 / " + selectedBatchCount));
+            if (tvBadgeCount != null) tvBadgeCount.setText(L.t(this, "0 / " + selectedBatchCount));
+        }
+    }
+
+    private int passThroughCount = 0;
+
+    /** True if screen point (x, y) is under the visible overlay. */
+    public boolean covers(int x, int y) {
+        // Read from the loop thread: uses the rectangle the main thread last published, never the View.
+        return coverShown && x >= coverL && x < coverR && y >= coverT && y < coverB;
+    }
+
+    private volatile boolean coverShown;
+    private volatile int coverL, coverT, coverR, coverB;
+
+    /** Main thread: remember where the overlay is on screen (called after every layout/draw/visibility change). */
+    private void publishCover() {
+        View v = overlayView;
+        if (v == null || !v.isShown()) { coverShown = false; return; }
+        int[] loc = new int[2];
+        v.getLocationOnScreen(loc);
+        coverL = loc[0]; coverT = loc[1];
+        coverR = loc[0] + v.getWidth(); coverB = loc[1] + v.getHeight();
+        coverShown = true;
+    }
+
+    /** While true, touches go through the overlay to the app underneath. Reference-counted. */
+    public void setPassThrough(boolean on) {
+        mainHandler.post(() -> {
+            passThroughCount = Math.max(0, passThroughCount + (on ? 1 : -1));
+            boolean want = passThroughCount > 0;
+            boolean has = (params.flags & WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE) != 0;
+            if (want == has || overlayView == null) return;
+            if (want) params.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+            else params.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+            try {
+                windowManager.updateViewLayout(overlayView, params);
+            } catch (Exception e) {
+                Log.e(TAG, "setPassThrough failed", e);
+            }
+        });
+    }
+
+    private void minimize() {
+        if (overlayPanel != null) overlayPanel.setVisibility(View.GONE);
+        if (overlayBadge != null) overlayBadge.setVisibility(View.VISIBLE);
+        updateLayoutSafely();
+    }
+
+    private void expand() {
+        if (overlayBadge != null) overlayBadge.setVisibility(View.GONE);
+        if (overlayPanel != null) overlayPanel.setVisibility(View.VISIBLE);
+        updateLayoutSafely();
+        // The badge may have been dragged to an edge; keep the full panel on screen
+        overlayView.post(() -> {
+            DisplayMetrics dm = getResources().getDisplayMetrics();
+            int maxX = Math.max(0, dm.widthPixels - overlayView.getWidth());
+            int maxY = Math.max(0, dm.heightPixels - overlayView.getHeight());
+            int x = Math.min(Math.max(0, params.x), maxX);
+            int y = Math.min(Math.max(0, params.y), maxY);
+            if (x != params.x || y != params.y) {
+                params.x = x;
+                params.y = y;
+                updateLayoutSafely();
+            }
+        });
+    }
+
+    /** The view may already be removed (service stopping): never let that crash the app. */
+    private void updateLayoutSafely() {
+        if (windowManager == null || overlayView == null || params == null) return;
+        try {
+            windowManager.updateViewLayout(overlayView, params);
+        } catch (IllegalArgumentException e) {
+            Log.w(TAG, "updateViewLayout: view is gone", e);
+        }
+    }
+
+    private void updateUiStats() {
+        mainHandler.post(() -> {
+            AutomationService s = AutomationService.getInstance();
+            if (s == null || !s.isRunning()) {
+                setActionIdle();
+                if (tvBadgeCount != null) {
+                    tvBadgeCount.setText(L.t(this, "0 / " + selectedBatchCount));
+                }
+            }
+
+            if (overlayView != null) overlayView.invalidate();
+        });
+    }
+
+    @Override
+    public void onProgress(String status, String currentCode, int done, int target, int success, int invalid, int remaining) {
+        Log.d(TAG, "Overlay onProgress -> " + done + "/" + target + " [" + status + "] ✓=" + success + " ✗=" + invalid);
+        mainHandler.post(() -> {
+            if (tvProgress != null) tvProgress.setText(L.t(this, done + " / " + target));
+            mainHandler.removeCallbacks(thinkTick);
+            if (thinkBar != null) thinkBar.setVisibility(View.GONE);
+            if (tvOverlayStatus != null) tvOverlayStatus.setText(L.t(this, status));
+            thinkDots = 0;
+            if ("Thinking...".equals(status)) thinkTick.run(); // live countdown until the answer is tapped
+
+            if (tvBadgeCount != null) tvBadgeCount.setText(L.t(this, done + " / " + target));
+            setActionRunning();
+            if (overlayView != null) overlayView.invalidate();
+        });
+    }
+
+    private View thinkBar;
+    private int thinkDots = 0;
+
+    /** Counts down the "thinking" wait: whole seconds in the status line + a bar along the bottom that empties. */
+    private final Runnable thinkTick = new Runnable() {
+        @Override public void run() {
+            long left = AutomationService.thinkDeadline - System.currentTimeMillis();
+            if (left <= 0 || tvOverlayStatus == null) {
+                if (thinkBar != null) thinkBar.setVisibility(View.GONE);
+                return;
+            }
+            // No seconds: "Thinking" with dots that cycle, and the bar shows how long is left.
+            int dots = 1 + (int) ((System.currentTimeMillis() / 400) % 3);
+            if (dots != thinkDots) { // text (and so layout) changes only when the dots do, not every tick
+                thinkDots = dots;
+                String base = L.t(OverlayService.this, "Thinking...").replaceAll("\\.+$", "");
+                StringBuilder sb = new StringBuilder(base);
+                for (int i = 0; i < dots; i++) sb.append('.');
+                tvOverlayStatus.setText(sb);
+            }
+            if (thinkBar != null) {
+                long total = Math.max(1, AutomationService.thinkTotalMs);
+                thinkBar.setVisibility(View.VISIBLE);
+                thinkBar.setPivotX(0);
+                thinkBar.setScaleX(Math.min(1f, left / (float) total));
+            }
+            mainHandler.postDelayed(this, 50);
+        }
+    };
+
+    @Override
+    public void onStopped(String reason) {
+        Log.i(TAG, "Overlay onStopped -> " + reason);
+        mainHandler.post(() -> {
+            mainHandler.removeCallbacks(thinkTick);
+            if (thinkBar != null) thinkBar.setVisibility(View.GONE);
+            if (tvOverlayStatus != null) tvOverlayStatus.setText(L.t(this, reason));
+            setActionIdle();
+            // Run finished: the count goes back to the last one used and the counters start from 0 again.
+            selectBatch(savedBatch());
+            if (tvProgress != null) tvProgress.setText(L.t(this, "0 / " + selectedBatchCount));
+            if (tvBadgeCount != null) tvBadgeCount.setText(L.t(this, "0 / " + selectedBatchCount));
+            updateUiStats();
+            if (overlayView != null) overlayView.invalidate();
+        });
+    }
+
+    @Override
+    public void onKeysChanged() {
+        if (selectedMode == AutomationService.AutomationMode.CODES) {
+            updateUiStats();
+        }
+    }
+}

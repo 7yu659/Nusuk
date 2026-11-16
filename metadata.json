@@ -1,6 +1,6 @@
 {
-  "name": "নুসুক উমরাহ চ্যালেঞ্জ রেফারেল কোড লাইভ বোর্ড",
-  "description": "নুসুক উমরাহ চ্যালেঞ্জের সর্বশেষ ভেরিফাইড রেফারেল কোড ও বোনাস কি লাইভ বোর্ড — https://quiz.nusuk.unlimited-key.fynex.site/",
+  "name": "Nusuk Auto",
+  "description": "Interactive preview and companion workspace for Nusuk Auto — automating Umrah key codes and the Nusuk door quiz in English and Bangla.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
