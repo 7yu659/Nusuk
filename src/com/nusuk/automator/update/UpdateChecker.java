@@ -31,6 +31,7 @@ import com.nusuk.automator.automation.AutomationService;
 import com.nusuk.automator.core.AppInfo;
 import com.nusuk.automator.core.L;
 import com.nusuk.automator.core.Links;
+import com.nusuk.automator.notices.Notices;
 import com.nusuk.automator.ui.AdPopup;
 
 /**
@@ -119,7 +120,11 @@ public final class UpdateChecker {
             boolean newer = isNewer(a, cached);
             if (badge != null) badge.onChecked(newer ? cached : null);
             if (newer) {
+                Notices.storeUpdateNoticeIfNew(a, cached);
                 showForcedDialog(a, cached);
+            } else {
+                p.edit().remove("notifiedKey").apply();
+                Notices.cancelUpdateNotification(a);
             }
         }
         long now = System.currentTimeMillis();
@@ -142,6 +147,22 @@ public final class UpdateChecker {
             if (info != null) showForcedDialog(a, info);
             else Toast.makeText(a, L.t(a, "You have the latest version"), Toast.LENGTH_SHORT).show();
         }, true);
+    }
+
+    public static String versionLabel(Info info) {
+        if (info == null) return "";
+        if (info.versionName != null && !info.versionName.isEmpty()) {
+            return "v" + info.versionName + (info.buildNumber > 0 ? " (#" + info.buildNumber + ")" : "");
+        }
+        return info.buildNumber > 0 ? "#" + info.buildNumber : "";
+    }
+
+    public static String updateKey(Info info) {
+        if (info == null) return "";
+        if (info.versionCode == 0 && info.buildNumber == 0 && (info.versionName == null || info.versionName.isEmpty())) {
+            return "";
+        }
+        return info.versionCode + ":" + info.buildNumber + ":" + (info.versionName == null ? "" : info.versionName);
     }
 
     static boolean isNewer(Context c, Info i) {
@@ -389,49 +410,93 @@ public final class UpdateChecker {
         }
     }
 
+    private static Info fetchCandidate(Context app) throws Exception {
+        final String repo = githubRepo(app);
+        Info candidate = null;
+        boolean sawNoRelease = false;
+        try {
+            candidate = fetchFromGithubReleaseApi(repo);
+        } catch (Exception apiErr) {
+            if (apiErr instanceof NoReleaseException) sawNoRelease = true;
+            Log.w(TAG, "GitHub API failed, trying latest redirect: " + apiErr);
+            try {
+                candidate = fetchFromLatestRedirect(repo);
+            } catch (Exception redirErr) {
+                if (redirErr instanceof NoReleaseException) sawNoRelease = true;
+                Log.w(TAG, "Release redirect failed, trying releases.atom: " + redirErr);
+                try {
+                    candidate = fetchFromReleasesAtom(repo);
+                } catch (Exception atomErr) {
+                    if (atomErr instanceof NoReleaseException) sawNoRelease = true;
+                    Log.w(TAG, "Releases atom failed, trying raw version.json: " + atomErr);
+                    try {
+                        candidate = fetchFromRawVersionJson(repo);
+                    } catch (NoReleaseException rawMissing) {
+                        if (!sawNoRelease) throw rawMissing;
+                        // All endpoints responded over HTTPS that no release is published yet -> treat as up-to-date.
+                        candidate = null;
+                    }
+                }
+            }
+        }
+        return candidate;
+    }
+
+    /** Background check (NoticeJob): refreshes update cache and notifies old users when a new release is pushed. */
+    public static synchronized boolean checkInBackground(Context c) {
+        if (c == null) return false;
+        Context app = c.getApplicationContext();
+        try {
+            Info candidate = fetchCandidate(app);
+            SharedPreferences p = prefs(app);
+            p.edit().putLong("lastCheck", System.currentTimeMillis()).apply();
+            if (candidate != null) {
+                saveCached(app, candidate);
+                if (isNewer(app, candidate)) {
+                    String key = updateKey(candidate);
+                    if (!key.isEmpty() && !key.equals(p.getString("notifiedKey", ""))) {
+                        p.edit().putString("notifiedKey", key).apply();
+                        Notices.notifyUpdateAvailable(app, candidate);
+                    } else {
+                        Notices.storeUpdateNoticeIfNew(app, candidate);
+                    }
+                } else {
+                    p.edit().remove("notifiedKey").apply();
+                    Notices.cancelUpdateNotification(app);
+                }
+            }
+            return true;
+        } catch (NoReleaseException emptyRepo) {
+            Log.i(TAG, "No releases published yet for background check");
+            return true;
+        } catch (Exception e) {
+            Log.w(TAG, "Background update check failed: " + e);
+            return false;
+        }
+    }
+
     /** Queries GitHub Releases API, then /releases/latest redirect, then releases.atom, then raw version.json. */
     private static void fetch(Activity a, Listener cb, boolean reportErrors) {
         final Context app = a.getApplicationContext();
-        final String repo = githubRepo(app);
         fetchInFlight = true;
         fetchStartedAt = System.currentTimeMillis();
         exec.execute(() -> {
             Info newer = null;
             String error = null;
             try {
-                Info candidate = null;
-                boolean sawNoRelease = false;
-                try {
-                    candidate = fetchFromGithubReleaseApi(repo);
-                } catch (Exception apiErr) {
-                    if (apiErr instanceof NoReleaseException) sawNoRelease = true;
-                    Log.w(TAG, "GitHub API failed, trying latest redirect: " + apiErr);
-                    try {
-                        candidate = fetchFromLatestRedirect(repo);
-                    } catch (Exception redirErr) {
-                        if (redirErr instanceof NoReleaseException) sawNoRelease = true;
-                        Log.w(TAG, "Release redirect failed, trying releases.atom: " + redirErr);
-                        try {
-                            candidate = fetchFromReleasesAtom(repo);
-                        } catch (Exception atomErr) {
-                            if (atomErr instanceof NoReleaseException) sawNoRelease = true;
-                            Log.w(TAG, "Releases atom failed, trying raw version.json: " + atomErr);
-                            try {
-                                candidate = fetchFromRawVersionJson(repo);
-                            } catch (NoReleaseException rawMissing) {
-                                if (!sawNoRelease) throw rawMissing;
-                                // All endpoints responded over HTTPS that no release is published yet -> treat as up-to-date.
-                                candidate = null;
-                            }
-                        }
-                    }
-                }
+                Info candidate = fetchCandidate(app);
                 if (candidate != null) {
                     saveCached(app, candidate);
-                    if (isNewer(app, candidate)) newer = candidate;
+                    if (isNewer(app, candidate)) {
+                        newer = candidate;
+                        Notices.storeUpdateNoticeIfNew(app, candidate);
+                    } else {
+                        prefs(app).edit().remove("notifiedKey").apply();
+                        Notices.cancelUpdateNotification(app);
+                    }
                 }
             } catch (NoReleaseException emptyRepo) {
-                Log.i(TAG, "No GitHub releases published yet for " + repo);
+                Log.i(TAG, "No releases published yet");
             } catch (Exception e) {
                 Log.w(TAG, "Update check failed: " + e);
                 error = e.toString();
@@ -482,9 +547,7 @@ public final class UpdateChecker {
             try { shown.dismiss(); } catch (Exception ignored) {}
         }
 
-        String verLabel = info.versionName != null && !info.versionName.isEmpty()
-                ? "v" + info.versionName + (info.buildNumber > 0 ? " (#" + info.buildNumber + ")" : "")
-                : (info.buildNumber > 0 ? "#" + info.buildNumber : "");
+        String verLabel = versionLabel(info);
         String cleanNotes = cleanReleaseNotes(info.notes);
         String msg = L.t(a, "A new version of Nusuk Auto is available. Please install the latest update before continuing.")
                 + (cleanNotes.isEmpty() ? "" : "\n\n" + L.t(a, "What's new:") + "\n" + cleanNotes)
