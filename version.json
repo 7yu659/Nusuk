@@ -1,11 +1,11 @@
 {
-  "versionCode": 54,
-  "buildNumber": 32,
+  "versionCode": 55,
+  "buildNumber": 33,
   "versionName": "2.8",
   "minVersionCode": 999999,
   "forceUpdate": true,
-  "url": "https://github.com/7yu659/Nusuk/releases/download/v2.8-b32/nusuk-auto.apk",
-  "htmlUrl": "https://github.com/7yu659/Nusuk/releases/tag/v2.8-b32",
-  "notes": "Important update (Build #32). Bug fixes and improvements.",
-  "sha256": "5f7f799e2c4b1d8c8a1479de31146c3371639fc59d1774a2d1aaade19c999dd3"
+  "url": "https://github.com/7yu659/Nusuk/releases/download/v2.8-b33/nusuk-auto.apk",
+  "htmlUrl": "https://github.com/7yu659/Nusuk/releases/tag/v2.8-b33",
+  "notes": "Important update (Build #33). Bug fixes and improvements.",
+  "sha256": "582100410d9d665e5b2cb071bee3120007f1595bb925809f014d9d162394d3f3"
 }
