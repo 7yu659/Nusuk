@@ -25,6 +25,7 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 import com.nusuk.automator.R;
+import com.nusuk.automator.codes.CodeDownloader;
 import com.nusuk.automator.codes.CodeSync;
 import com.nusuk.automator.codes.KeyRepository;
 import com.nusuk.automator.overlay.OverlayService;
@@ -409,8 +410,11 @@ public class AutomationService extends AccessibilityService {
         this.isRunning = true;
         this.isPaused = false;
 
-        // Fresh shared dead-code list and backup before the first code.
-        if (mode == AutomationMode.CODES) CodeSync.syncSoon(this, 0);
+        // Fresh shared dead-code list, database codes, and backup before the first code.
+        if (mode == AutomationMode.CODES) {
+            CodeDownloader.start(this, false);
+            CodeSync.syncSoon(this, 0);
+        }
 
         // Reset Codes state
         this.currentCode = null;
@@ -1116,6 +1120,11 @@ public class AutomationService extends AccessibilityService {
                         codeAttempts = 0;
                     }
                     if (currentCode == null) {
+                        if (CodeDownloader.running) {
+                            notifyProgress("Downloading codes...");
+                            scheduleNextStep(500);
+                            return;
+                        }
                         stopAutomation("All codes tested!");
                         return;
                     }
