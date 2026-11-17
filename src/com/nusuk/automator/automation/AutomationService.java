@@ -402,6 +402,10 @@ public class AutomationService extends AccessibilityService {
     // ---------- controls (loop thread) ----------
 
     private void doStart(int count, AutomationMode mode) {
+        if (com.nusuk.automator.update.UpdateChecker.isBlocked(this)) {
+            doStop(com.nusuk.automator.core.L.t(this, "Update required"));
+            return;
+        }
         this.targetBatchCount = count > 0 ? count : 10;
         this.currentMode = mode;
         Log.i(TAG, "startAutomation: mode=" + currentMode + ", count=" + targetBatchCount);
@@ -1357,7 +1361,7 @@ public class AutomationService extends AccessibilityService {
             valid.add(c);
         }
 
-        if (valid.size() < 2) return null;
+        if (valid.isEmpty() || (scanQuestion == null && valid.size() < 2)) return null;
 
         // Sort by top bounds ascending (stable: same-row items keep document order)
         Collections.sort(valid, (a, b) -> Integer.compare(a.bounds.top, b.bounds.top));

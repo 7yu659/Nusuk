@@ -28,11 +28,14 @@ public final class Http {
         }
     }
 
-    /** POSTs `payload` to api_base + path. Follows HTTP redirects (including 307/308). Throws on network errors. */
+    /** POSTs `payload` to a full URL or api_base + path. Follows HTTP redirects (including 307/308). Throws on network errors. */
     public static Response postJson(Context ctx, String path, JSONObject payload, int connectMs, int readMs) throws Exception {
         byte[] bytes = payload.toString().getBytes(StandardCharsets.UTF_8);
         String deviceId = Access.deviceId(ctx);
-        URL url = new URL(ctx.getString(R.string.api_base) + path);
+        String target = (path != null && (path.startsWith("https://") || path.startsWith("http://")))
+                ? path
+                : (ctx.getString(R.string.api_base) + path);
+        URL url = new URL(target);
         for (int hop = 0; hop < 5; hop++) {
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             try {

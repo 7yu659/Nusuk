@@ -48,6 +48,9 @@ public final class UpdateChecker {
     private static final ExecutorService exec = Executors.newSingleThreadExecutor();
     private static final Handler main = new Handler(Looper.getMainLooper());
     private static final Pattern BUILD_TAG_RE = Pattern.compile("(?i)(?:^|[-_b])(\\d+)$");
+    private static final Pattern ATOM_TAG_RE = Pattern.compile("/releases/tag/([^\"'<\\s]+)");
+    private static volatile boolean fetchInFlight = false;
+    private static volatile long fetchStartedAt = 0;
 
     /** GitHub answered over HTTPS that no releases or version.json exist yet (not a network error). */
     private static final class NoReleaseException extends Exception {}
@@ -120,7 +123,9 @@ public final class UpdateChecker {
             }
         }
         long now = System.currentTimeMillis();
-        if (!forceFresh && now - p.getLong("lastCheck", 0) < CHECK_MIN_GAP_MS) return;
+        long last = p.getLong("lastCheck", 0);
+        if (!forceFresh && last <= now && now - last < CHECK_MIN_GAP_MS) return;
+        if (fetchInFlight && now - fetchStartedAt < 25_000L) return;
         fetch(a, info -> {
             p.edit().putLong("lastCheck", System.currentTimeMillis()).apply();
             if (badge != null) badge.onChecked(info);
@@ -132,6 +137,7 @@ public final class UpdateChecker {
     public static void manualCheck(Activity a, Listener badge) {
         Toast.makeText(a, L.t(a, "Checking for updates..."), Toast.LENGTH_SHORT).show();
         fetch(a, info -> {
+            prefs(a).edit().putLong("lastCheck", System.currentTimeMillis()).apply();
             if (badge != null) badge.onChecked(info);
             if (info != null) showForcedDialog(a, info);
             else Toast.makeText(a, L.t(a, "You have the latest version"), Toast.LENGTH_SHORT).show();
@@ -144,9 +150,12 @@ public final class UpdateChecker {
         int curBuild = currentBuildNumber(c);
         String curName = AppInfo.versionName(c);
         if (i.versionCode > curCode) return true;
-        if (i.versionCode == curCode && i.buildNumber > curBuild && i.buildNumber > 0) return true;
-        if (i.versionCode == 0 && i.buildNumber > curBuild && i.buildNumber > 0) return true;
-        return compareSemver(i.versionName, curName) > 0;
+        int semverCmp = compareSemver(i.versionName, curName);
+        if (semverCmp > 0) return true;
+        if (i.buildNumber > curBuild && i.buildNumber > 0) {
+            if (i.versionCode == curCode || i.versionCode == 0 || semverCmp >= 0) return true;
+        }
+        return false;
     }
 
     private static int compareSemver(String remote, String local) {
@@ -209,26 +218,42 @@ public final class UpdateChecker {
     }
 
     private static String httpGet(String url) throws Exception {
-        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-        conn.setRequestProperty("User-Agent", "NusukAuto-Android");
-        conn.setRequestProperty("Accept", "application/vnd.github+json");
-        conn.setInstanceFollowRedirects(true);
-        conn.setConnectTimeout(8000);
-        conn.setReadTimeout(8000);
-        conn.setUseCaches(false);
-        try {
-            int code = conn.getResponseCode();
-            if (code == 404) throw new NoReleaseException();
-            if (code != 200) throw new Exception("HTTP " + code);
-            StringBuilder sb = new StringBuilder();
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = br.readLine()) != null) sb.append(line).append('\n');
+        URL current = new URL(url);
+        for (int hop = 0; hop < 6; hop++) {
+            HttpURLConnection conn = (HttpURLConnection) current.openConnection();
+            String host = current.getHost() == null ? "" : current.getHost().toLowerCase(java.util.Locale.ROOT);
+            conn.setRequestProperty("User-Agent", "NusukAuto-Android");
+            conn.setRequestProperty("Accept", "api.github.com".equals(host)
+                    ? "application/vnd.github+json"
+                    : "application/json, text/xml, */*");
+            conn.setRequestProperty("Cache-Control", "no-cache");
+            conn.setRequestProperty("Pragma", "no-cache");
+            conn.setInstanceFollowRedirects(false);
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(8000);
+            conn.setUseCaches(false);
+            try {
+                int code = conn.getResponseCode();
+                if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                    String loc = conn.getHeaderField("Location");
+                    if (loc != null && !loc.isEmpty()) {
+                        current = new URL(current, loc);
+                        continue;
+                    }
+                }
+                if (code == 404) throw new NoReleaseException();
+                if (code != 200) throw new Exception("HTTP " + code);
+                StringBuilder sb = new StringBuilder();
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = br.readLine()) != null) sb.append(line).append('\n');
+                }
+                return sb.toString();
+            } finally {
+                conn.disconnect();
             }
-            return sb.toString();
-        } finally {
-            conn.disconnect();
         }
+        throw new Exception("Too many redirects");
     }
 
     private static Info infoFromTag(String repo, String tag, String htmlUrl) {
@@ -256,10 +281,7 @@ public final class UpdateChecker {
         return base;
     }
 
-    private static Info fetchFromGithubReleaseApi(String repo) throws Exception {
-        String apiUrl = "https://api.github.com/repos/" + repo + "/releases/latest";
-        String body = httpGet(apiUrl);
-        JSONObject rel = new JSONObject(body);
+    private static Info parseReleaseObject(String repo, JSONObject rel) {
         String tag = rel.optString("tag_name", "").trim();
         Info info = infoFromTag(repo, tag, rel.optString("html_url", "https://github.com/" + repo + "/releases"));
         info.notes = rel.optString("body", "").trim();
@@ -282,31 +304,35 @@ public final class UpdateChecker {
         return mergeAssetVersionJson(info, versionAssetUrl);
     }
 
+    private static Info fetchFromGithubReleaseApi(String repo) throws Exception {
+        try {
+            String apiUrl = "https://api.github.com/repos/" + repo + "/releases/latest";
+            return parseReleaseObject(repo, new JSONObject(httpGet(apiUrl)));
+        } catch (NoReleaseException e) {
+            // If /releases/latest returns 404 (e.g. prerelease-only), inspect recent releases.
+            String listUrl = "https://api.github.com/repos/" + repo + "/releases?per_page=5";
+            JSONArray arr = new JSONArray(httpGet(listUrl));
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject rel = arr.optJSONObject(i);
+                if (rel != null && !rel.optBoolean("draft", false)) {
+                    return parseReleaseObject(repo, rel);
+                }
+            }
+            throw e;
+        }
+    }
+
     /** Rate-limit-free fallback: inspects the 302 Location of /releases/latest to resolve tag & version.json. */
     private static Info fetchFromLatestRedirect(String repo) throws Exception {
         String latestPage = "https://github.com/" + repo + "/releases/latest";
-        HttpURLConnection conn = (HttpURLConnection) new URL(latestPage).openConnection();
-        conn.setRequestMethod("HEAD");
-        conn.setRequestProperty("User-Agent", "NusukAuto-Android");
-        conn.setInstanceFollowRedirects(false);
-        conn.setConnectTimeout(8000);
-        conn.setReadTimeout(8000);
-        conn.setUseCaches(false);
-        String loc;
-        try {
-            int code = conn.getResponseCode();
-            if (code == 404) throw new NoReleaseException();
-            loc = conn.getHeaderField("Location");
-            if ((code < 300 || code >= 400) || loc == null) {
-                throw new Exception("No release redirect (" + code + ")");
-            }
-            loc = new URL(new URL(latestPage), loc).toString();
-            if (!loc.contains("/releases/tag/")) {
-                if (loc.replaceFirst("[?#].*$", "").endsWith("/releases")) throw new NoReleaseException();
-                throw new Exception("No release tag redirect (" + loc + ")");
-            }
-        } finally {
-            conn.disconnect();
+        String loc = probeRedirectLocation(latestPage, "HEAD");
+        if (loc == null) {
+            loc = probeRedirectLocation(latestPage, "GET");
+        }
+        if (loc == null) throw new Exception("No release redirect");
+        if (!loc.contains("/releases/tag/")) {
+            if (loc.replaceFirst("[?#].*$", "").endsWith("/releases")) throw new NoReleaseException();
+            throw new Exception("No release tag redirect (" + loc + ")");
         }
         int idx = loc.indexOf("/releases/tag/");
         String tag = loc.substring(idx + "/releases/tag/".length()).split("[?#]")[0].trim();
@@ -316,10 +342,59 @@ public final class UpdateChecker {
         return mergeAssetVersionJson(info, verUrl);
     }
 
-    /** Queries GitHub Releases API, then /releases/latest redirect, then raw version.json on main. */
+    private static String probeRedirectLocation(String pageUrl, String method) throws Exception {
+        HttpURLConnection conn = (HttpURLConnection) new URL(pageUrl).openConnection();
+        conn.setRequestMethod(method);
+        conn.setRequestProperty("User-Agent", "NusukAuto-Android");
+        conn.setRequestProperty("Cache-Control", "no-cache");
+        conn.setInstanceFollowRedirects(false);
+        conn.setConnectTimeout(8000);
+        conn.setReadTimeout(8000);
+        conn.setUseCaches(false);
+        try {
+            int code = conn.getResponseCode();
+            if (code == 404) throw new NoReleaseException();
+            String loc = conn.getHeaderField("Location");
+            if (code >= 300 && code < 400 && loc != null && !loc.isEmpty()) {
+                return new URL(new URL(pageUrl), loc).toString();
+            }
+            if ("HEAD".equals(method)) return null;
+            throw new Exception("No release redirect (" + code + ")");
+        } finally {
+            conn.disconnect();
+        }
+    }
+
+    /** Rate-limit-free Atom feed fallback when REST API & /releases/latest redirect fail. */
+    private static Info fetchFromReleasesAtom(String repo) throws Exception {
+        String xml = httpGet("https://github.com/" + repo + "/releases.atom");
+        Matcher m = ATOM_TAG_RE.matcher(xml);
+        if (!m.find()) throw new NoReleaseException();
+        String tag = m.group(1).trim();
+        if (tag.isEmpty()) throw new NoReleaseException();
+        String htmlUrl = "https://github.com/" + repo + "/releases/tag/" + tag;
+        Info info = infoFromTag(repo, tag, htmlUrl);
+        String verUrl = "https://github.com/" + repo + "/releases/download/" + tag + "/version.json";
+        return mergeAssetVersionJson(info, verUrl);
+    }
+
+    private static Info fetchFromRawVersionJson(String repo) throws Exception {
+        long t = System.currentTimeMillis();
+        try {
+            String rawMain = "https://raw.githubusercontent.com/" + repo + "/main/version.json?t=" + t;
+            return parseInfoJson(new JSONObject(httpGet(rawMain)));
+        } catch (NoReleaseException e) {
+            String rawMaster = "https://raw.githubusercontent.com/" + repo + "/master/version.json?t=" + t;
+            return parseInfoJson(new JSONObject(httpGet(rawMaster)));
+        }
+    }
+
+    /** Queries GitHub Releases API, then /releases/latest redirect, then releases.atom, then raw version.json. */
     private static void fetch(Activity a, Listener cb, boolean reportErrors) {
         final Context app = a.getApplicationContext();
         final String repo = githubRepo(app);
+        fetchInFlight = true;
+        fetchStartedAt = System.currentTimeMillis();
         exec.execute(() -> {
             Info newer = null;
             String error = null;
@@ -335,14 +410,19 @@ public final class UpdateChecker {
                         candidate = fetchFromLatestRedirect(repo);
                     } catch (Exception redirErr) {
                         if (redirErr instanceof NoReleaseException) sawNoRelease = true;
-                        Log.w(TAG, "Release redirect failed, trying raw version.json: " + redirErr);
+                        Log.w(TAG, "Release redirect failed, trying releases.atom: " + redirErr);
                         try {
-                            String rawUrl = "https://raw.githubusercontent.com/" + repo + "/main/version.json?t=" + System.currentTimeMillis();
-                            candidate = parseInfoJson(new JSONObject(httpGet(rawUrl)));
-                        } catch (NoReleaseException rawMissing) {
-                            if (!sawNoRelease) throw rawMissing;
-                            // All endpoints responded over HTTPS that no release is published yet -> treat as up-to-date.
-                            candidate = null;
+                            candidate = fetchFromReleasesAtom(repo);
+                        } catch (Exception atomErr) {
+                            if (atomErr instanceof NoReleaseException) sawNoRelease = true;
+                            Log.w(TAG, "Releases atom failed, trying raw version.json: " + atomErr);
+                            try {
+                                candidate = fetchFromRawVersionJson(repo);
+                            } catch (NoReleaseException rawMissing) {
+                                if (!sawNoRelease) throw rawMissing;
+                                // All endpoints responded over HTTPS that no release is published yet -> treat as up-to-date.
+                                candidate = null;
+                            }
                         }
                     }
                 }
@@ -355,6 +435,8 @@ public final class UpdateChecker {
             } catch (Exception e) {
                 Log.w(TAG, "Update check failed: " + e);
                 error = e.toString();
+            } finally {
+                fetchInFlight = false;
             }
             final Info result = newer;
             final boolean failed = error != null;
@@ -405,12 +487,15 @@ public final class UpdateChecker {
         dlg.setCanceledOnTouchOutside(false);
         dlg.setOnKeyListener((d, keyCode, event) -> keyCode == KeyEvent.KEYCODE_BACK);
         dlg.setOnDismissListener(d -> { if (shown == d) shown = null; });
-        shown = dlg;
-        dlg.show();
-
-        // Override button listeners after show() so tapping either button never dismisses the update lock.
-        dlg.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener(v -> openDownload(a, info, true));
-        dlg.getButton(DialogInterface.BUTTON_NEUTRAL).setOnClickListener(v -> openDownload(a, info, false));
+        try {
+            shown = dlg;
+            dlg.show();
+            // Override button listeners after show() so tapping either button never dismisses the update lock.
+            dlg.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener(v -> openDownload(a, info, true));
+            dlg.getButton(DialogInterface.BUTTON_NEUTRAL).setOnClickListener(v -> openDownload(a, info, false));
+        } catch (Exception ignored) {
+            if (shown == dlg) shown = null;
+        }
     }
 
     static void openDownload(Activity a, Info info) {
