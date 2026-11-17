@@ -470,8 +470,10 @@ public final class L {
         x("Official website", "অফিসিয়াল ওয়েবসাইট");
         x("GitHub Release", "গিটহাব রিলিজ");
         x("Update now", "এখনই আপডেট করো");
+        x("A new version of Nusuk Auto is available. Please install the latest update before continuing.",
+                "Nusuk Auto-র নতুন ভার্সন এসেছে। সামনে এগিয়ে যেতে হলে অবশ্যই সর্বশেষ আপডেটটি ইনস্টল করতে হবে।");
         x("A new update was published on GitHub. You must install the latest version before continuing.",
-                "গিটহাবে নতুন আপডেট প্রকাশিত হয়েছে। সামনে এগিয়ে যেতে হলে অবশ্যই সর্বশেষ ভার্সনটি আপডেট করতে হবে।");
+                "নতুন আপডেট প্রকাশিত হয়েছে। সামনে এগিয়ে যেতে হলে অবশ্যই সর্বশেষ ভার্সনটি আপডেট করতে হবে।");
         x("Download the APK and install the update to continue.",
                 "চালিয়ে যেতে নতুন APK ডাউনলোড করে ইনস্টল করো।");
         x("Update failed. Try again or download it from GitHub.",

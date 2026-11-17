@@ -453,6 +453,20 @@ public final class UpdateChecker {
 
     private static AlertDialog shown;
 
+    private static String cleanReleaseNotes(String raw) {
+        if (raw == null) return "";
+        StringBuilder out = new StringBuilder();
+        for (String line : raw.split("\\r?\\n")) {
+            String t = line.trim();
+            if (t.isEmpty()) continue;
+            String lower = t.toLowerCase(java.util.Locale.ROOT);
+            if (lower.contains("github") || lower.startsWith("mandatory update build #")) continue;
+            if (out.length() > 0) out.append('\n');
+            out.append(t);
+        }
+        return out.toString().trim();
+    }
+
     /** Shows an un-dismissible mandatory update dialog. Users cannot proceed until updated. */
     public static void showForcedDialog(Activity a, Info info) {
         if (a == null || a.isFinishing() || a.isDestroyed()) return;
@@ -471,16 +485,16 @@ public final class UpdateChecker {
         String verLabel = info.versionName != null && !info.versionName.isEmpty()
                 ? "v" + info.versionName + (info.buildNumber > 0 ? " (#" + info.buildNumber + ")" : "")
                 : (info.buildNumber > 0 ? "#" + info.buildNumber : "");
-        String msg = L.t(a, "A new update was published on GitHub. You must install the latest version before continuing.")
-                + (info.notes.isEmpty() ? "" : "\n\n" + L.t(a, "What's new:") + "\n" + info.notes)
+        String cleanNotes = cleanReleaseNotes(info.notes);
+        String msg = L.t(a, "A new version of Nusuk Auto is available. Please install the latest update before continuing.")
+                + (cleanNotes.isEmpty() ? "" : "\n\n" + L.t(a, "What's new:") + "\n" + cleanNotes)
                 + "\n\n" + L.t(a, "Your progress is kept when you update.");
 
         AlertDialog.Builder b = new AlertDialog.Builder(a)
                 .setTitle(L.t(a, "Update required") + (verLabel.isEmpty() ? "" : " (" + verLabel + ")"))
                 .setMessage(msg)
                 .setCancelable(false)
-                .setPositiveButton(L.t(a, "Update now"), null)
-                .setNeutralButton(L.t(a, "GitHub Release"), null);
+                .setPositiveButton(L.t(a, "Update now"), null);
 
         AlertDialog dlg = b.create();
         dlg.setOwnerActivity(a);
@@ -490,9 +504,8 @@ public final class UpdateChecker {
         try {
             shown = dlg;
             dlg.show();
-            // Override button listeners after show() so tapping either button never dismisses the update lock.
+            // Override button listener after show() so tapping it never dismisses the update lock.
             dlg.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener(v -> openDownload(a, info, true));
-            dlg.getButton(DialogInterface.BUTTON_NEUTRAL).setOnClickListener(v -> openDownload(a, info, false));
         } catch (Exception ignored) {
             if (shown == dlg) shown = null;
         }
