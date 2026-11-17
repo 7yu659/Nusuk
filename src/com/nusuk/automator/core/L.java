@@ -493,6 +493,17 @@ public final class L {
         x("Saved on this phone for Auto Add Codes (server is currently unavailable).",
                 "সার্ভার এখন চালু না থাকায় কোডগুলো অটো কোড অ্যাডের জন্য এই ফোনেই সেভ করা হয়েছে।");
         r("Update required \\((.+)\\)", "আপডেট আবশ্যক ($1)");
+        x("Announcements", "ঘোষণা");
+        x("News and updates from Nusuk Auto", "Nusuk Auto-র নতুন খবর ও আপডেট");
+        x("App Updates", "অ্যাপ আপডেট");
+        x("Alerts when a new version of Nusuk Auto is available", "Nusuk Auto-র নতুন ভার্সন এলে নোটিফিকেশন");
+        x("New update available", "নতুন আপডেট এসেছে");
+        r("New update available · (.+)", "নতুন আপডেট এসেছে · $1");
+        x("A fresh version of Nusuk Auto is ready with important fixes and improvements. Tap to update now.",
+                "Nusuk Auto-র নতুন ভার্সন এসেছে গুরুত্বপূর্ণ উন্নতি ও ফিক্সসহ। আরও সুন্দর অভিজ্ঞতা পেতে ট্যাপ করে এখনই আপডেট করুন।");
+        r("A fresh version of Nusuk Auto \\((.+)\\) is ready with important fixes and improvements\\. Tap to update now\\.",
+                "Nusuk Auto-র নতুন ভার্সন ($1) এসেছে গুরুত্বপূর্ণ উন্নতি ও ফিক্সসহ। আরও সুন্দর অভিজ্ঞতা পেতে ট্যাপ করে এখনই আপডেট করুন।");
+        r("(.*)Tap to update", "$1ট্যাপ করে আপডেট করো");
         x("1", "১");
         x("2", "২");
         x("3", "৩");
