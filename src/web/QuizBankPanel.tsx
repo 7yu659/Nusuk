@@ -102,7 +102,7 @@ export function QuizBankPanel({ lang }: { lang: Lang }) {
               ? 'প্রশ্ন বা উত্তর খুঁজুন (যেমন: zamzam, hijra)...'
               : 'Search bundled quiz questions or answers...'
           }
-          className="w-full h-11 pl-10 pr-4 rounded-xl bg-[#FAFAFA] border border-[#E5E7EB] text-[14px] text-[#18181B] placeholder:text-[#A1A1AA] focus:outline-none focus:border-[#15803D]"
+          className="w-full h-11 pl-10 pr-4 rounded-xl bg-[#FAFAFA] border border-[#E5E7EB] text-[14px] text-[#18181B] placeholder:text-[#A1A1AA] focus:outline-none focus:border-[#111111]"
         />
       </div>
 
@@ -116,7 +116,7 @@ export function QuizBankPanel({ lang }: { lang: Lang }) {
             filteredRight.map((item) => (
               <div key={item.question} className="py-3 space-y-1">
                 <div className="text-[14px] text-[#44403C] capitalize">{item.question}?</div>
-                <div className="text-[14px] font-medium text-[#15803D]">{item.answer}</div>
+                <div className="text-[14px] font-medium text-[#111111]">{item.answer}</div>
               </div>
             ))
           )

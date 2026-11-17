@@ -17,7 +17,7 @@ import com.nusuk.automator.update.UpdateChecker;
 
 /** App settings: language (English / Bangla), the pace of the quiz automation, adding keys, updates. */
 public class SettingsActivity extends ScreenActivity {
-    private static final int BLUE = 0xFF15803D, BLUE_SOFT = 0xFFECFDF5, GREY_LINE = 0xFFE5E7EB;
+    private static final int BLUE = 0xFF111111, BLUE_SOFT = 0xFFF4F4F5, GREY_LINE = 0xFFE5E7EB;
 
     /** One tappable option: a radio mark, a title and an optional description. */
     private final class Choice {
@@ -136,7 +136,7 @@ public class SettingsActivity extends ScreenActivity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        updateStatus = text("", 15, 0xFF15803D);
+        updateStatus = text("", 15, 0xFF111111);
         row.addView(updateStatus, new LinearLayout.LayoutParams(0, -2, 1));
         updateBtn = pill("Check for updates", 0, false, 0,
                 () -> UpdateChecker.manualCheck(this, this::showUpdateStatus));
@@ -157,7 +157,7 @@ public class SettingsActivity extends ScreenActivity {
             updateBtn.setText(L.t(this, "Update"));
         } else {
             updateStatus.setText(L.t(this, "You have the latest version"));
-            updateStatus.setTextColor(0xFF15803D);
+            updateStatus.setTextColor(0xFF111111);
             updateBtn.setText(L.t(this, "Check for updates"));
         }
     }

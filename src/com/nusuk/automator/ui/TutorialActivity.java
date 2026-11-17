@@ -48,7 +48,7 @@ public class TutorialActivity extends Activity {
         float dp = getResources().getDisplayMetrics().density;
 
         root = new FrameLayout(this);
-        root.setBackgroundColor(0xFF14532D); // the page header's color, also behind the status bar
+        root.setBackgroundColor(0xFF000000); // the page header's color, also behind the status bar
 
         web = new WebView(this);
         web.setBackgroundColor(0xFFF5F5F4);

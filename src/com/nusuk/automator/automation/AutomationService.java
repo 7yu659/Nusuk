@@ -588,6 +588,15 @@ public class AutomationService extends AccessibilityService {
             for (Item it : items) if (!it.lower.isEmpty()) sb.append(it.lower).append(' ');
             return sb.toString();
         }
+
+        String allTextAndDescLower() {
+            StringBuilder sb = new StringBuilder();
+            for (Item it : items) {
+                if (!it.lower.isEmpty()) sb.append(it.lower).append(' ');
+                if (!it.descLower.isEmpty()) sb.append(it.descLower).append(' ');
+            }
+            return sb.toString();
+        }
     }
 
     private static final long CACHE_MAX_AGE_MS = 1000;
@@ -867,7 +876,15 @@ public class AutomationService extends AccessibilityService {
                         int g = 0;
                         for (int i = 0; i < currentOpts.size(); i++) {
                             boolean known = false;
-                            for (String w : bad) if (QuizStore.norm(w).equals(QuizStore.norm(currentOpts.get(i)))) known = true;
+                            String optNorm = QuizStore.norm(currentOpts.get(i));
+                            String optCanon = QuizStore.canonical(currentOpts.get(i));
+                            for (String w : bad) {
+                                if (QuizStore.norm(w).equals(optNorm)
+                                        || (!optCanon.isEmpty() && QuizStore.canonical(w).equals(optCanon))) {
+                                    known = true;
+                                    break;
+                                }
+                            }
                             if (!known) { g = i; break; }
                         }
                         Log.e(TAG, "QuizSolver error: " + errorMessage + " -> guessing option " + g);
@@ -1297,14 +1314,37 @@ public class AutomationService extends AccessibilityService {
             handler.post(safe(() -> { if (isRunning && currentMode == AutomationMode.QUIZ) handleQuizDenied(message); }));
 
     private static boolean isQuizChromeText(String lower) {
+        if (lower.isEmpty()) return true;
         if (lower.contains("check your answer")) return true;
         if (lower.contains("your key can unlock") || lower.contains("draw for an umrah")) return true;
-        if (lower.contains("choose a door") || lower.contains("start the challenge")) return true;
-        if (lower.contains("play again") || lower.contains("select an answer") || lower.contains("choose an answer")) return true;
+        if (lower.contains("choose a door") || lower.contains("start the challenge") || lower.contains("open the door")) return true;
+        if (lower.contains("play again") || lower.contains("select an answer") || lower.contains("choose an answer")
+                || lower.contains("select the correct answer") || lower.contains("choose the correct answer")
+                || lower.contains("tap an answer") || lower.contains("pick an answer")) return true;
+        if (lower.equals("the prophet's biography") || lower.equals("the prophet’s biography")
+                || lower.equals("the prophetic biography") || lower.equals("the quran")
+                || lower.equals("makkah and the grand mosque") || lower.equals("mecca and the grand mosque")
+                || lower.equals("madinah and the prophet's mosque") || lower.equals("madinah and the prophet’s mosque")
+                || lower.equals("medina and the prophet's mosque") || lower.equals("medina and the prophet’s mosque")) return true;
+        if (lower.matches("door\\s*\\d+")) return true;
         if (lower.matches("\\d{1,2}:\\d{2}")) return true; // countdown timer like 00:29
+        if (lower.matches("\\d{1,3}\\s*(?:s|sec|secs|seconds?)")) return true; // timer badge like 30s
         if (lower.matches("(?:question|q)\\s*\\d+(?:\\s*(?:of|/)\\s*\\d+)?")) return true;
-        if (lower.matches("\\d+\\s*/\\s*\\d+")) return true; // progress badge like 1/5
-        return "back".equals(lower) || "close".equals(lower) || "keys".equals(lower) || "play".equals(lower) || "home".equals(lower);
+        if (lower.matches("\\d+\\s*(?:/|of)\\s*\\d+")) return true; // progress badge like 1/5 or 1 of 5
+        if (lower.matches("[a-d][.):]?")) return true; // option letter badge A / B / C / D
+        if (lower.matches("[1-4][.):]")) return true; // option number badge 1. / 2)
+        if (lower.matches("[^\\p{L}\\p{N}]+")) return true; // pure punctuation / symbols
+        return "back".equals(lower) || "close".equals(lower) || "keys".equals(lower) || "play".equals(lower)
+                || "home".equals(lower) || "hint".equals(lower) || "skip".equals(lower) || "next".equals(lower)
+                || "continue".equals(lower) || "points".equals(lower) || "score".equals(lower);
+    }
+
+    private static boolean hasClickableAncestor(AccessibilityNodeInfo node) {
+        AccessibilityNodeInfo cur = node;
+        for (int depth = 0; cur != null && depth < 5; depth++, cur = cur.getParent()) {
+            if (cur.isClickable() && cur.isEnabled() && !cur.isScrollable()) return true;
+        }
+        return false;
     }
 
     private QuizQuestionData extractQuizData(Screen screen) {
@@ -1322,10 +1362,37 @@ public class AutomationService extends AccessibilityService {
         // Sort by top bounds ascending (stable: same-row items keep document order)
         Collections.sort(valid, (a, b) -> Integer.compare(a.bounds.top, b.bounds.top));
 
-        QuizQuestionData data = new QuizQuestionData();
-        data.question = valid.get(0).text;
+        // Identify the actual question node: prefer the top-most non-clickable item ending in '?'
+        // or reading like a full question, so any stray category/door banner above it isn't picked as the question.
+        int qIdx = 0;
+        if (scanQuestion == null) {
+            int firstClickableIdx = -1;
+            for (int i = 0; i < valid.size(); i++) {
+                if (hasClickableAncestor(valid.get(i).node)) {
+                    firstClickableIdx = i;
+                    break;
+                }
+            }
+            int searchLimit = firstClickableIdx > 0 ? firstClickableIdx : Math.min(valid.size() - 1, 3);
+            int bestNonQ = -1;
+            for (int i = 0; i < searchLimit; i++) {
+                Item cand = valid.get(i);
+                if (cand.text.endsWith("?") || cand.text.endsWith("؟")) {
+                    qIdx = i;
+                    bestNonQ = i;
+                    break;
+                }
+                if (bestNonQ < 0 && (cand.text.length() >= 20 || cand.text.contains(" "))) {
+                    bestNonQ = i;
+                }
+            }
+            if (bestNonQ >= 0) qIdx = bestNonQ;
+        }
 
-        for (int i = 1; i < valid.size(); i++) {
+        QuizQuestionData data = new QuizQuestionData();
+        data.question = valid.get(qIdx).text;
+
+        for (int i = qIdx + 1; i < valid.size(); i++) {
             data.options.add(valid.get(i).text);
         }
 
@@ -1346,6 +1413,13 @@ public class AutomationService extends AccessibilityService {
                     || (!normAns.isEmpty() && optNorm.equals(normAns))) {
                 return i;
             }
+        }
+
+        // 1b. Canonical / unit-stripped / transliteration match via QuizStore
+        String canonicalOpt = QuizStore.matchUniqueOption(answer, options, null);
+        if (canonicalOpt != null) {
+            int idx = options.indexOf(canonicalOpt);
+            if (idx >= 0) return idx;
         }
 
         // 2. Whole-token / word-boundary match (prevents "3" matching "13" or "no" matching "knowledge")
@@ -1672,9 +1746,15 @@ public class AutomationService extends AccessibilityService {
     }
 
     private boolean isQuizResultCorrect(Screen screen) {
-        String allText = screen.allTextLower();
-        return allText.contains("correct")
-                && !allText.contains("incorrect") && !allText.contains("wrong") && !allText.contains("better luck");
+        String allText = screen.allTextAndDescLower();
+        boolean negative = allText.contains("incorrect") || allText.contains("wrong")
+                || allText.contains("not correct") || allText.contains("better luck")
+                || allText.contains("hard luck") || allText.contains("try again")
+                || allText.contains("oops");
+        if (negative) return false;
+        return allText.contains("correct") || allText.contains("well done")
+                || allText.contains("congratulations") || allText.contains("right answer")
+                || allText.contains("bravo") || allText.contains("great job");
     }
 
     /**
@@ -1786,8 +1866,20 @@ public class AutomationService extends AccessibilityService {
                     if (!it.text.isEmpty() && QuizStore.norm(it.text).equals(normPending)) { opt = it; break; }
                 }
             }
+            if (opt == null) {
+                String canonPending = QuizStore.canonical(pendingAnswer);
+                if (!canonPending.isEmpty()) {
+                    for (Item it : screen.items) {
+                        if (!it.text.isEmpty() && QuizStore.canonical(it.text).equals(canonPending)) { opt = it; break; }
+                    }
+                }
+            }
             if (opt != null && onScreen(opt)) {
-                tapNode(opt.node);
+                if (checkWaitTries >= 2 && !opt.bounds.isEmpty()) {
+                    tapCoordinates(opt.bounds.centerX(), opt.bounds.centerY());
+                } else {
+                    tapNode(opt.node);
+                }
                 answerTapped = true;
                 scheduleNextStep(250);
                 return;
@@ -1805,10 +1897,22 @@ public class AutomationService extends AccessibilityService {
         }
         Item check = screen.find("Check your answer");
         if (check != null && onScreen(check)) {
-            if (!check.node.isEnabled() && checkWaitTries < 3) {
-                checkWaitTries++;
-                if (checkWaitTries == 2) answerTapped = false; // option tap may have missed -> re-tap option once
-                scheduleNextStep(250);
+            if (!check.node.isEnabled()) {
+                if (checkWaitTries < 4) {
+                    checkWaitTries++;
+                    answerTapped = false; // option tap missed or didn't select -> re-tap option (coord tap on >=2)
+                    scheduleNextStep(250);
+                    return;
+                }
+                Log.w(TAG, "Check button stayed disabled after retries -> re-reading question");
+                pendingAnswer = null;
+                pendingCountLocal = false;
+                checkWaitTries = 0;
+                quizSolvingInProgress = false;
+                lastQuestion = null;
+                resetScan();
+                scrollPageUp(screen);
+                scheduleNextStep(500);
                 return;
             }
             checkWaitTries = 0;
@@ -1835,6 +1939,7 @@ public class AutomationService extends AccessibilityService {
         scanQuestion = null;
         scanOptions.clear();
         scanScrolls = 0;
+        scanTopScrolls = 0;
     }
 
     /** Adds one screen's read to the question being scanned (the first text ever read is the question). */

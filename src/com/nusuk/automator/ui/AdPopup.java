@@ -81,14 +81,14 @@ public final class AdPopup {
 
         TextView sponsor = new TextView(a);
         sponsor.setText(L.t(a, "Sponsored"));
-        sponsor.setTextColor(0xFFECFDF5);
+        sponsor.setTextColor(0xFFF4F4F5);
         sponsor.setTextSize(11);
         sponsor.setTypeface(a.getResources().getFont(R.font.plex_medium));
         sponsor.setPadding((int) (10 * dp), (int) (4 * dp), (int) (10 * dp), (int) (4 * dp));
         GradientDrawable spBg = new GradientDrawable();
         spBg.setCornerRadius(999f * dp);
-        spBg.setColor(0xCC0F2E1E);
-        spBg.setStroke((int) (1 * dp), 0x66BBF7D0);
+        spBg.setColor(0xCC09090B);
+        spBg.setStroke((int) (1 * dp), 0x66D4D4D8);
         sponsor.setBackground(spBg);
         topBar.addView(sponsor, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -106,8 +106,8 @@ public final class AdPopup {
         counter.setFocusable(false);
         GradientDrawable cBg = new GradientDrawable();
         cBg.setShape(GradientDrawable.OVAL);
-        cBg.setColor(0xE614532D);
-        cBg.setStroke((int) (1.5f * dp), 0xFFBBF7D0);
+        cBg.setColor(0xE609090B);
+        cBg.setStroke((int) (1.5f * dp), 0xFFD4D4D8);
         counter.setBackground(cBg);
         int badgeSize = (int) (36 * dp);
         topBar.addView(counter, new LinearLayout.LayoutParams(badgeSize, badgeSize));
@@ -119,7 +119,7 @@ public final class AdPopup {
         GradientDrawable cardBg = new GradientDrawable();
         cardBg.setColor(0xFFFFFFFF);
         cardBg.setCornerRadius(20f * dp);
-        cardBg.setStroke((int) (1.5f * dp), 0xFFBBF7D0);
+        cardBg.setStroke((int) (1.5f * dp), 0xFFD4D4D8);
         card.setBackground(cardBg);
         card.setClipToOutline(true);
         card.setOutlineProvider(new ViewOutlineProvider() {

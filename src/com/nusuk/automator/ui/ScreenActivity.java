@@ -16,7 +16,7 @@ import com.nusuk.automator.core.L;
 import com.nusuk.automator.core.Links;
 import com.nusuk.automator.overlay.OverlayService;
 
-/** Base for the simple pages (Help, Developer, Notifications): green top bar + scrolling content built in code. */
+/** Base for the simple pages (Help, Developer, Notifications): black top bar + scrolling content built in code. */
 public abstract class ScreenActivity extends Activity {
     protected LinearLayout content;
     protected TextView barAction;
@@ -89,7 +89,7 @@ public abstract class ScreenActivity extends Activity {
         return c;
     }
 
-    /** Pill button: [filled] green/blue solid with white text, else soft green. */
+    /** Pill button: [filled] black solid with white text, else soft neutral pill. */
     protected TextView pill(String label, int iconRes, boolean filled, int fillColor, Runnable click) {
         TextView t = new TextView(this);
         t.setText(L.t(this, label));
@@ -107,7 +107,7 @@ public abstract class ScreenActivity extends Activity {
             t.setTextColor(0xFFFFFFFF);
         } else {
             t.setBackgroundResource(R.drawable.btn_soft);
-            t.setTextColor(0xFF166534);
+            t.setTextColor(0xFF111111);
         }
         if (iconRes != 0) {
             t.setCompoundDrawablesRelativeWithIntrinsicBounds(iconRes, 0, 0, 0);

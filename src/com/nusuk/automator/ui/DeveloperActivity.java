@@ -25,7 +25,7 @@ public class DeveloperActivity extends ScreenActivity {
         return "About developer";
     }
 
-    /** Compact emerald quick-action pill in the profile header. */
+    /** Compact black quick-action pill in the profile header. */
     private TextView quickAction(String label, boolean primary, Runnable click) {
         TextView btn = new TextView(this);
         btn.setText(L.t(this, label));
@@ -38,12 +38,12 @@ public class DeveloperActivity extends ScreenActivity {
         GradientDrawable g = new GradientDrawable();
         g.setCornerRadius(px(999));
         if (primary) {
-            g.setColor(0xFF15803D);
+            g.setColor(0xFF111111);
             btn.setTextColor(0xFFFFFFFF);
         } else {
-            g.setColor(0xFFECFDF5);
-            g.setStroke(px(1), 0xFFBBF7D0);
-            btn.setTextColor(0xFF166534);
+            g.setColor(0xFFF4F4F5);
+            g.setStroke(px(1), 0xFFD4D4D8);
+            btn.setTextColor(0xFF111111);
         }
         btn.setBackground(g);
         btn.setClickable(true);
@@ -52,7 +52,7 @@ public class DeveloperActivity extends ScreenActivity {
         return btn;
     }
 
-    /** Tappable corporate contact row: soft emerald icon badge, title, subtitle, chevron. */
+    /** Tappable corporate contact row: soft neutral icon badge, title, subtitle, chevron. */
     private LinearLayout linkRow(int iconRes, String title, String sub, Runnable open) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -108,14 +108,14 @@ public class DeveloperActivity extends ScreenActivity {
         heroCard.setPadding(0, 0, 0, px(22));
         heroCard.setClipToOutline(true);
 
-        // Top emerald corporate cover strip
+        // Top black corporate cover strip
         FrameLayout cover = new FrameLayout(this);
         cover.setBackgroundResource(R.drawable.topbar_bg);
         cover.setPadding(px(16), px(14), px(16), px(46));
 
         TextView badge = new TextView(this);
         badge.setText(L.t(this, "FYNEX · SOFTWARE & AUTOMATION"));
-        badge.setTextColor(0xFFDCFCE7);
+        badge.setTextColor(0xFFE4E4E7);
         badge.setTextSize(11);
         badge.setLetterSpacing(0.1f);
         badge.setTypeface(getResources().getFont(R.font.plex_medium));
@@ -132,7 +132,7 @@ public class DeveloperActivity extends ScreenActivity {
         GradientDrawable ring = new GradientDrawable();
         ring.setShape(GradientDrawable.OVAL);
         ring.setColor(0xFFFFFFFF);
-        ring.setStroke(px(3), 0xFFBBF7D0);
+        ring.setStroke(px(3), 0xFFD4D4D8);
         avatarWrap.setBackground(ring);
         avatarWrap.setPadding(px(4), px(4), px(4), px(4));
 
@@ -161,7 +161,7 @@ public class DeveloperActivity extends ScreenActivity {
         np.gravity = Gravity.CENTER_HORIZONTAL;
         heroCard.addView(name, np);
 
-        TextView role = text("Founder & Lead Developer · Fynex", 14.5f, 0xFF15803D);
+        TextView role = text("Founder & Lead Developer · Fynex", 14.5f, 0xFF111111);
         role.setTypeface(getResources().getFont(R.font.plex_medium));
         role.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams rp = lp(-2, -2, 3);
@@ -220,6 +220,6 @@ public class DeveloperActivity extends ScreenActivity {
         about.addView(text("Nusuk Auto is developed and maintained by Ebrahim Khalil at Fynex (fynex.site) to help Umrah pilgrims automate Nusuk codes and challenges safely.", 15, 0xFF44403C), lp(-1, -2, 6));
         about.addView(text("This helper is independent and not affiliated with the Nusuk app or the Ministry of Hajj and Umrah.", 14.5f, 0xFF71717A), lp(-1, -2, 8));
         String v = AppInfo.versionName(this);
-        about.addView(text("Version " + v, 14, 0xFF15803D), lp(-2, -2, 12));
+        about.addView(text("Version " + v, 14, 0xFF111111), lp(-2, -2, 12));
     }
 }

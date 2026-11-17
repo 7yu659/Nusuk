@@ -59,7 +59,7 @@ public class AddKeysActivity extends ScreenActivity {
         row.addView(paste);
         android.view.View sp = new android.view.View(this);
         row.addView(sp, new LinearLayout.LayoutParams(0, 1, 1));
-        submit = pill("Add codes", 0, true, 0xFF15803D, this::onSubmit);
+        submit = pill("Add codes", 0, true, 0xFF111111, this::onSubmit);
         row.addView(submit);
         c.addView(row, lp(-1, -2, 12));
 
@@ -133,9 +133,9 @@ public class AddKeysActivity extends ScreenActivity {
                     : r.error.startsWith("SERVER ") ? "The server could not add the codes right now (error " + r.error.substring(7) + "). Please try again later."
                     : r.error, 0xFFB91C1C);
         } else if (localFallback) {
-            showMessage("Saved on this phone for Auto Add Codes (server is currently unavailable).", 0xFF15803D);
+            showMessage("Saved on this phone for Auto Add Codes (server is currently unavailable).", 0xFF111111);
         }
-        if (!r.added.isEmpty()) group("✓  " + r.added.size() + " new code" + (r.added.size() == 1 ? "" : "s") + " added. Thank you!", r.added, 0xFF15803D);
+        if (!r.added.isEmpty()) group("✓  " + r.added.size() + " new code" + (r.added.size() == 1 ? "" : "s") + " added. Thank you!", r.added, 0xFF111111);
         if (!dup.isEmpty()) group("＝  " + dup.size() + " already in the list", dup, 0xFFB45309);
         if (!bad.isEmpty()) group("✗  " + bad.size() + " not a valid code (NG- and 8 letters or digits)", bad, 0xFFB91C1C);
         if (r.error == null && r.added.isEmpty() && dup.isEmpty() && bad.isEmpty()) showMessage("Nothing to add.", getColor(R.color.text_secondary));

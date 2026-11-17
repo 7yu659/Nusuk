@@ -182,7 +182,7 @@ export function PhoneApp({
     };
 
     return (
-      <div className="flex flex-col h-full min-h-[640px] bg-[#F6F7F6] text-[#18181B]">
+      <div className="flex flex-col h-full min-h-[640px] bg-[#F7F7F7] text-[#18181B]">
         <div className="hero-gradient px-3 pt-2.5 pb-3 flex items-center gap-3 text-white shrink-0">
           <button
             type="button"
@@ -264,7 +264,7 @@ export function PhoneApp({
               {/* About card */}
               <div className="rounded-2xl bg-white border border-[#E5E7EB] p-4 space-y-3.5">
                 <div className="flex items-center gap-3.5">
-                  <div className="w-[52px] h-[52px] rounded-2xl bg-[#ECFDF5] flex items-center justify-center shrink-0">
+                  <div className="w-[52px] h-[52px] rounded-2xl bg-[#F4F4F5] flex items-center justify-center shrink-0">
                     <NusukLogo className="w-8 h-8" />
                   </div>
                   <div className="min-w-0">
@@ -278,13 +278,13 @@ export function PhoneApp({
                   {t(lang, 'Adds Umrah codes and plays the Nusuk quiz for you, so you save time.')}
                 </p>
                 <div className="flex items-center justify-between gap-3 pt-1">
-                  <span className="text-[14px] text-[#15803D]">
+                  <span className="text-[14px] text-[#111111]">
                     {t(lang, 'You have the latest version')}
                   </span>
                   <button
                     type="button"
                     onClick={() => onToast(t(lang, 'You have the latest version'))}
-                    className="px-4 py-2 min-h-[40px] rounded-full bg-[#ECFDF5] border border-[#BBF7D0] hover:bg-[#DCFCE7] text-[#166534] text-[14px] font-medium whitespace-nowrap transition-colors"
+                    className="px-4 py-2 min-h-[40px] rounded-full bg-[#F4F4F5] border border-[#D4D4D8] hover:bg-[#E4E4E7] text-[#111111] text-[14px] font-medium whitespace-nowrap transition-colors"
                   >
                     {t(lang, 'Check for updates')}
                   </button>
@@ -306,14 +306,14 @@ export function PhoneApp({
                       onClick={() => onLangChange('en')}
                       className={`flex items-center gap-3 p-3.5 rounded-xl border text-left transition-colors min-h-[48px] ${
                         lang === 'en'
-                          ? 'bg-[#ECFDF5] border-[#15803D] border-2'
+                          ? 'bg-[#F4F4F5] border-[#111111] border-2'
                           : 'bg-white border-[#E5E7EB]'
                       }`}
                     >
                       <span
                         className={`w-6 h-6 rounded-full flex items-center justify-center text-[13px] shrink-0 ${
                           lang === 'en'
-                            ? 'bg-[#15803D] text-white'
+                            ? 'bg-[#111111] text-white'
                             : 'border-2 border-[#D4D4D8] text-transparent'
                         }`}
                       >
@@ -327,14 +327,14 @@ export function PhoneApp({
                       onClick={() => onLangChange('bn')}
                       className={`flex items-center gap-3 p-3.5 rounded-xl border text-left transition-colors min-h-[48px] ${
                         lang === 'bn'
-                          ? 'bg-[#ECFDF5] border-[#15803D] border-2'
+                          ? 'bg-[#F4F4F5] border-[#111111] border-2'
                           : 'bg-white border-[#E5E7EB]'
                       }`}
                     >
                       <span
                         className={`w-6 h-6 rounded-full flex items-center justify-center text-[13px] shrink-0 ${
                           lang === 'bn'
-                            ? 'bg-[#15803D] text-white'
+                            ? 'bg-[#111111] text-white'
                             : 'border-2 border-[#D4D4D8] text-transparent'
                         }`}
                       >
@@ -360,14 +360,14 @@ export function PhoneApp({
                     onClick={() => onPaceModeChange(true)}
                     className={`w-full flex items-start gap-3 p-3.5 rounded-xl border text-left transition-colors ${
                       paceNormal
-                        ? 'bg-[#ECFDF5] border-[#15803D] border-2'
+                        ? 'bg-[#F4F4F5] border-[#111111] border-2'
                         : 'bg-white border-[#E5E7EB]'
                     }`}
                   >
                     <span
                       className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center text-[13px] shrink-0 ${
                         paceNormal
-                          ? 'bg-[#15803D] text-white'
+                          ? 'bg-[#111111] text-white'
                           : 'border-2 border-[#D4D4D8] text-transparent'
                       }`}
                     >
@@ -391,14 +391,14 @@ export function PhoneApp({
                     onClick={() => onPaceModeChange(false)}
                     className={`w-full flex items-start gap-3 p-3.5 rounded-xl border text-left transition-colors ${
                       !paceNormal
-                        ? 'bg-[#ECFDF5] border-[#15803D] border-2'
+                        ? 'bg-[#F4F4F5] border-[#111111] border-2'
                         : 'bg-white border-[#E5E7EB]'
                     }`}
                   >
                     <span
                       className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center text-[13px] shrink-0 ${
                         !paceNormal
-                          ? 'bg-[#15803D] text-white'
+                          ? 'bg-[#111111] text-white'
                           : 'border-2 border-[#D4D4D8] text-transparent'
                       }`}
                     >
@@ -431,7 +431,7 @@ export function PhoneApp({
                               const next = Math.max(1, minSec - 1);
                               onRangeChange(next, Math.max(next, maxSec));
                             }}
-                            className="w-11 h-9 rounded-full bg-[#ECFDF5] border border-[#BBF7D0] hover:bg-[#DCFCE7] text-[#166534] font-medium text-lg"
+                            className="w-11 h-9 rounded-full bg-[#F4F4F5] border border-[#D4D4D8] hover:bg-[#E4E4E7] text-[#111111] font-medium text-lg"
                           >
                             −
                           </button>
@@ -444,7 +444,7 @@ export function PhoneApp({
                               const next = Math.min(10, minSec + 1);
                               onRangeChange(next, Math.max(next, maxSec));
                             }}
-                            className="w-11 h-9 rounded-full bg-[#ECFDF5] border border-[#BBF7D0] hover:bg-[#DCFCE7] text-[#166534] font-medium text-lg"
+                            className="w-11 h-9 rounded-full bg-[#F4F4F5] border border-[#D4D4D8] hover:bg-[#E4E4E7] text-[#111111] font-medium text-lg"
                           >
                             +
                           </button>
@@ -459,7 +459,7 @@ export function PhoneApp({
                               const next = Math.max(minSec, maxSec - 1);
                               onRangeChange(Math.min(minSec, next), next);
                             }}
-                            className="w-11 h-9 rounded-full bg-[#ECFDF5] border border-[#BBF7D0] hover:bg-[#DCFCE7] text-[#166534] font-medium text-lg"
+                            className="w-11 h-9 rounded-full bg-[#F4F4F5] border border-[#D4D4D8] hover:bg-[#E4E4E7] text-[#111111] font-medium text-lg"
                           >
                             −
                           </button>
@@ -472,7 +472,7 @@ export function PhoneApp({
                               const next = Math.min(15, maxSec + 1);
                               onRangeChange(minSec, next);
                             }}
-                            className="w-11 h-9 rounded-full bg-[#ECFDF5] border border-[#BBF7D0] hover:bg-[#DCFCE7] text-[#166534] font-medium text-lg"
+                            className="w-11 h-9 rounded-full bg-[#F4F4F5] border border-[#D4D4D8] hover:bg-[#E4E4E7] text-[#111111] font-medium text-lg"
                           >
                             +
                           </button>
@@ -498,7 +498,7 @@ export function PhoneApp({
                   <button
                     type="button"
                     onClick={() => onNavigate('addKeys')}
-                    className="px-4 py-2 min-h-[40px] rounded-full bg-[#ECFDF5] border border-[#BBF7D0] hover:bg-[#DCFCE7] text-[#166534] text-[15px] font-medium transition-colors"
+                    className="px-4 py-2 min-h-[40px] rounded-full bg-[#F4F4F5] border border-[#D4D4D8] hover:bg-[#E4E4E7] text-[#111111] text-[15px] font-medium transition-colors"
                   >
                     {t(lang, 'Add your own codes')}
                   </button>
@@ -516,7 +516,7 @@ export function PhoneApp({
                   <button
                     type="button"
                     onClick={handleShareApp}
-                    className="px-4 py-2 min-h-[40px] rounded-full bg-[#ECFDF5] border border-[#BBF7D0] hover:bg-[#DCFCE7] text-[#166534] text-[15px] font-medium transition-colors"
+                    className="px-4 py-2 min-h-[40px] rounded-full bg-[#F4F4F5] border border-[#D4D4D8] hover:bg-[#E4E4E7] text-[#111111] text-[15px] font-medium transition-colors"
                   >
                     {t(lang, 'Share the app')}
                   </button>
@@ -543,7 +543,7 @@ export function PhoneApp({
                           : 'Debug report prepared (App v2.7 · Ebrahim Khalil)',
                       )
                     }
-                    className="px-4 py-2 min-h-[40px] rounded-full bg-[#ECFDF5] border border-[#BBF7D0] hover:bg-[#DCFCE7] text-[#166534] text-[15px] font-medium transition-colors"
+                    className="px-4 py-2 min-h-[40px] rounded-full bg-[#F4F4F5] border border-[#D4D4D8] hover:bg-[#E4E4E7] text-[#111111] text-[15px] font-medium transition-colors"
                   >
                     {t(lang, 'Share debug report')}
                   </button>
@@ -566,7 +566,7 @@ export function PhoneApp({
                   value={keysInput}
                   onChange={(e) => setKeysInput(e.target.value)}
                   placeholder="NG-xxxxxxxx"
-                  className="w-full rounded-xl bg-white border border-[#D4D4D8] p-3 text-[16px] font-mono-code text-[#18181B] placeholder:text-[#A1A1AA] focus:outline-none focus:border-[#15803D]"
+                  className="w-full rounded-xl bg-white border border-[#D4D4D8] p-3 text-[16px] font-mono-code text-[#18181B] placeholder:text-[#A1A1AA] focus:outline-none focus:border-[#111111]"
                 />
                 <div className="flex items-center justify-between gap-3">
                   <button
@@ -574,14 +574,14 @@ export function PhoneApp({
                     onClick={() => {
                       setKeysInput('NG-aB3dE9fG, NG-kL8mN2pQ\nNG-9kLm2QrT');
                     }}
-                    className="px-4 py-2 min-h-[40px] rounded-full bg-[#ECFDF5] border border-[#BBF7D0] hover:bg-[#DCFCE7] text-[#166534] text-[15px] font-medium transition-colors"
+                    className="px-4 py-2 min-h-[40px] rounded-full bg-[#F4F4F5] border border-[#D4D4D8] hover:bg-[#E4E4E7] text-[#111111] text-[15px] font-medium transition-colors"
                   >
                     {t(lang, 'Paste')}
                   </button>
                   <button
                     type="button"
                     onClick={handleParseAndAddKeys}
-                    className="px-5 py-2 min-h-[40px] rounded-full bg-[#15803D] hover:bg-[#166534] text-white text-[15px] font-medium transition-colors"
+                    className="px-5 py-2 min-h-[40px] rounded-full bg-[#111111] hover:bg-[#27272A] text-white text-[15px] font-medium transition-colors"
                   >
                     {t(lang, 'Add codes')}
                   </button>
@@ -592,7 +592,7 @@ export function PhoneApp({
                 <div className="space-y-3">
                   {parseResult.added.length > 0 && (
                     <div className="rounded-2xl bg-white border border-[#E5E7EB] p-4">
-                      <div className="text-[16px] font-medium text-[#15803D]">
+                      <div className="text-[16px] font-medium text-[#111111]">
                         {lang === 'bn'
                           ? `✓  ${toBnDigits(parseResult.added.length)}টা নতুন কোড অ্যাড হয়েছে। ধন্যবাদ!`
                           : `✓  ${parseResult.added.length} new code${parseResult.added.length === 1 ? '' : 's'} added. Thank you!`}
@@ -635,8 +635,8 @@ export function PhoneApp({
             <>
               {notices.length === 0 ? (
                 <div className="flex flex-col items-center text-center px-6 pt-14">
-                  <div className="w-[76px] h-[76px] rounded-full bg-[#ECFDF5] flex items-center justify-center">
-                    <Bell className="w-8 h-8 text-[#15803D]" />
+                  <div className="w-[76px] h-[76px] rounded-full bg-[#F4F4F5] flex items-center justify-center">
+                    <Bell className="w-8 h-8 text-[#111111]" />
                   </div>
                   <div className="mt-4 text-[18px] font-medium text-[#18181B]">
                     {t(lang, 'No notifications yet')}
@@ -652,12 +652,12 @@ export function PhoneApp({
                       key={item.id}
                       className={`rounded-2xl border p-4 flex items-start gap-3 ${
                         item.unread
-                          ? 'bg-[#F0FDF4] border-[#BBF7D0]'
+                          ? 'bg-[#F4F4F5] border-[#D4D4D8]'
                           : 'bg-white border-[#E5E7EB]'
                       }`}
                     >
-                      <div className="w-10 h-10 rounded-full bg-[#ECFDF5] flex items-center justify-center shrink-0">
-                        <Bell className="w-5 h-5 text-[#15803D]" />
+                      <div className="w-10 h-10 rounded-full bg-[#F4F4F5] flex items-center justify-center shrink-0">
+                        <Bell className="w-5 h-5 text-[#111111]" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="text-[16px] font-medium text-[#18181B]">{item.title}</div>
@@ -679,12 +679,12 @@ export function PhoneApp({
               {/* Corporate Brand & Founder Header */}
               <div className="rounded-2xl bg-white border border-[#E5E7EB] overflow-hidden">
                 <div className="hero-gradient pt-4 pb-12 px-4 flex justify-center">
-                  <span className="px-3 py-1 rounded-full bg-white/20 text-[#DCFCE7] text-[11px] font-medium tracking-[0.08em] uppercase">
+                  <span className="px-3 py-1 rounded-full bg-white/20 text-[#E4E4E7] text-[11px] font-medium tracking-[0.08em] uppercase">
                     {t(lang, 'FYNEX · SOFTWARE & AUTOMATION')}
                   </span>
                 </div>
                 <div className="px-5 pb-5 flex flex-col items-center text-center">
-                  <div className="-mt-12 w-24 h-24 rounded-full bg-white p-1 border-2 border-[#BBF7D0] shadow-sm overflow-hidden">
+                  <div className="-mt-12 w-24 h-24 rounded-full bg-white p-1 border-2 border-[#D4D4D8] shadow-sm overflow-hidden">
                     {!avatarFailed ? (
                       <img
                         src="/assets/dev_avatar.jpg"
@@ -694,7 +694,7 @@ export function PhoneApp({
                         className="w-full h-full rounded-full object-cover"
                       />
                     ) : (
-                      <div className="w-full h-full rounded-full bg-[#ECFDF5] text-[#15803D] font-semibold text-xl flex items-center justify-center">
+                      <div className="w-full h-full rounded-full bg-[#F4F4F5] text-[#111111] font-semibold text-xl flex items-center justify-center">
                         EK
                       </div>
                     )}
@@ -702,7 +702,7 @@ export function PhoneApp({
                   <div className="mt-3 text-[21px] font-medium text-[#18181B]">
                     {t(lang, 'Ebrahim Khalil')}
                   </div>
-                  <div className="mt-0.5 text-[14px] font-medium text-[#15803D]">
+                  <div className="mt-0.5 text-[14px] font-medium text-[#111111]">
                     {t(lang, 'Founder & Lead Developer · Fynex')}
                   </div>
 
@@ -712,7 +712,7 @@ export function PhoneApp({
                       href="https://wa.me/8801305359691"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="min-h-[40px] rounded-full bg-[#15803D] hover:bg-[#166534] text-white text-[13px] font-medium flex items-center justify-center transition-colors"
+                      className="min-h-[40px] rounded-full bg-[#111111] hover:bg-[#27272A] text-white text-[13px] font-medium flex items-center justify-center transition-colors"
                     >
                       {t(lang, 'WhatsApp')}
                     </a>
@@ -720,7 +720,7 @@ export function PhoneApp({
                       href="https://www.facebook.com/share/1CnXaXQFoL/"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="min-h-[40px] rounded-full bg-[#ECFDF5] border border-[#BBF7D0] hover:bg-[#DCFCE7] text-[#166534] text-[13px] font-medium flex items-center justify-center transition-colors"
+                      className="min-h-[40px] rounded-full bg-[#F4F4F5] border border-[#D4D4D8] hover:bg-[#E4E4E7] text-[#111111] text-[13px] font-medium flex items-center justify-center transition-colors"
                     >
                       {t(lang, 'Facebook')}
                     </a>
@@ -728,7 +728,7 @@ export function PhoneApp({
                       href="https://fynex.site"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="min-h-[40px] rounded-full bg-[#ECFDF5] border border-[#BBF7D0] hover:bg-[#DCFCE7] text-[#166534] text-[13px] font-medium flex items-center justify-center transition-colors"
+                      className="min-h-[40px] rounded-full bg-[#F4F4F5] border border-[#D4D4D8] hover:bg-[#E4E4E7] text-[#111111] text-[13px] font-medium flex items-center justify-center transition-colors"
                     >
                       {t(lang, 'Website')}
                     </a>
@@ -747,8 +747,8 @@ export function PhoneApp({
                     rel="noopener noreferrer"
                     className="flex items-center gap-3.5 px-4 min-h-[64px] hover:bg-[#FAFAFA] transition-colors rounded-t-2xl"
                   >
-                    <div className="w-10 h-10 rounded-full bg-[#ECFDF5] flex items-center justify-center shrink-0">
-                      <MessageCircle className="w-5 h-5 text-[#15803D]" />
+                    <div className="w-10 h-10 rounded-full bg-[#F4F4F5] flex items-center justify-center shrink-0">
+                      <MessageCircle className="w-5 h-5 text-[#111111]" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-[16px] font-medium text-[#18181B]">
@@ -764,8 +764,8 @@ export function PhoneApp({
                     rel="noopener noreferrer"
                     className="flex items-center gap-3.5 px-4 min-h-[64px] hover:bg-[#FAFAFA] transition-colors"
                   >
-                    <div className="w-10 h-10 rounded-full bg-[#ECFDF5] flex items-center justify-center shrink-0">
-                      <ExternalLink className="w-5 h-5 text-[#15803D]" />
+                    <div className="w-10 h-10 rounded-full bg-[#F4F4F5] flex items-center justify-center shrink-0">
+                      <ExternalLink className="w-5 h-5 text-[#111111]" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-[16px] font-medium text-[#18181B]">
@@ -783,8 +783,8 @@ export function PhoneApp({
                     rel="noopener noreferrer"
                     className="flex items-center gap-3.5 px-4 min-h-[64px] hover:bg-[#FAFAFA] transition-colors"
                   >
-                    <div className="w-10 h-10 rounded-full bg-[#ECFDF5] flex items-center justify-center shrink-0">
-                      <Globe className="w-5 h-5 text-[#15803D]" />
+                    <div className="w-10 h-10 rounded-full bg-[#F4F4F5] flex items-center justify-center shrink-0">
+                      <Globe className="w-5 h-5 text-[#111111]" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-[16px] font-medium text-[#18181B]">
@@ -798,8 +798,8 @@ export function PhoneApp({
                     href="mailto:skyebrahimkhalil@gmail.com"
                     className="flex items-center gap-3.5 px-4 min-h-[64px] hover:bg-[#FAFAFA] transition-colors rounded-b-2xl"
                   >
-                    <div className="w-10 h-10 rounded-full bg-[#ECFDF5] flex items-center justify-center shrink-0">
-                      <Mail className="w-5 h-5 text-[#15803D]" />
+                    <div className="w-10 h-10 rounded-full bg-[#F4F4F5] flex items-center justify-center shrink-0">
+                      <Mail className="w-5 h-5 text-[#111111]" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-[16px] font-medium text-[#18181B]">
@@ -834,7 +834,7 @@ export function PhoneApp({
                       'Nusuk Auto is an unofficial helper made for Nusuk users. It is not connected to the Nusuk app or the Ministry of Hajj and Umrah.',
                     )}
                   </p>
-                  <div className="pt-1 text-[14px] font-medium text-[#15803D] tabular-nums">
+                  <div className="pt-1 text-[14px] font-medium text-[#111111] tabular-nums">
                     {t(lang, 'Version 2.7')}
                   </div>
                 </div>
@@ -872,7 +872,7 @@ export function PhoneApp({
                 href="https://fynex.site"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 w-full min-h-[44px] rounded-xl bg-[#15803D] hover:bg-[#166534] text-white text-[15px] font-medium transition-colors"
+                className="flex items-center justify-center gap-2 w-full min-h-[44px] rounded-xl bg-[#111111] hover:bg-[#27272A] text-white text-[15px] font-medium transition-colors"
               >
                 <span>{lang === 'bn' ? 'অফিসিয়াল ওয়েবসাইট দেখো (fynex.site)' : 'Open fynex.site'}</span>
                 <ExternalLink className="w-4 h-4" />
@@ -884,11 +884,11 @@ export function PhoneApp({
     );
   }
 
-  // Main Home Screen (activity_main.xml — minimal green layout)
+  // Main Home Screen (activity_main.xml — minimal black layout)
   return (
-    <div className="flex flex-col h-full min-h-[640px] bg-[#F6F7F6] text-[#18181B]">
+    <div className="flex flex-col h-full min-h-[640px] bg-[#F7F7F7] text-[#18181B]">
       <div className="flex-1 overflow-y-auto flex flex-col">
-        {/* Compact Emerald Hero Header */}
+        {/* Compact Black Hero Header */}
         <div className="hero-gradient rounded-b-[22px] px-4 pt-3 pb-4 text-white shrink-0">
           <div className="flex items-center">
             <NusukLogo className="w-8 h-8 shrink-0" />
@@ -904,7 +904,7 @@ export function PhoneApp({
             >
               <Bell className="w-5 h-5" />
               {unreadCount > 0 && (
-                <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#EF4444] border border-[#15803D] text-[10px] font-semibold text-white flex items-center justify-center tabular-nums">
+                <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#EF4444] border border-[#111111] text-[10px] font-semibold text-white flex items-center justify-center tabular-nums">
                   {fmtNum(lang, unreadCount)}
                 </span>
               )}
@@ -930,14 +930,14 @@ export function PhoneApp({
               <div className="text-[30px] font-light leading-tight tabular-nums text-white">
                 {fmtNum(lang, codesToday)}
               </div>
-              <div className="text-[14px] text-[#ECFDF5]/80">{t(lang, 'Codes today')}</div>
+              <div className="text-[14px] text-[#E4E4E7]/80">{t(lang, 'Codes today')}</div>
             </div>
             <div className="w-px h-10 bg-white/20 mx-3 shrink-0" />
             <div className="flex-1 pl-1">
               <div className="text-[30px] font-light leading-tight tabular-nums text-white">
                 {fmtNum(lang, quizToday)}
               </div>
-              <div className="text-[14px] text-[#ECFDF5]/80">{t(lang, 'Quiz today')}</div>
+              <div className="text-[14px] text-[#E4E4E7]/80">{t(lang, 'Quiz today')}</div>
             </div>
             <ChevronRight className="w-5 h-5 text-white/80 shrink-0 mr-1" />
           </button>
@@ -947,10 +947,10 @@ export function PhoneApp({
         <div className="px-4 pt-4 pb-4 space-y-3.5 flex-1">
           {/* Running Banner */}
           {overlay.running && (
-            <div className="rounded-2xl bg-[#ECFDF5] border border-[#6EE7B7] p-4 flex items-center gap-3">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#10B981] shrink-0" />
+            <div className="rounded-2xl bg-[#F4F4F5] border border-[#D4D4D8] p-4 flex items-center gap-3">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#18181B] shrink-0" />
               <div className="flex-1 min-w-0">
-                <div className="text-[16px] font-medium text-[#064E3B] truncate">
+                <div className="text-[16px] font-medium text-[#111111] truncate">
                   {t(lang, overlay.mode === 'QUIZ' ? 'Playing quiz' : 'Adding codes')}
                 </div>
                 <div className="text-[14px] text-[#71717A] truncate">
@@ -987,7 +987,7 @@ export function PhoneApp({
                   <button
                     type="button"
                     onClick={() => onFixPermission('nusukInstalled')}
-                    className="px-4 py-1.5 min-h-[36px] rounded-full bg-[#15803D] hover:bg-[#166534] text-white text-[14px] font-medium whitespace-nowrap transition-colors"
+                    className="px-4 py-1.5 min-h-[36px] rounded-full bg-[#111111] hover:bg-[#27272A] text-white text-[14px] font-medium whitespace-nowrap transition-colors"
                   >
                     {t(lang, 'Install')}
                   </button>
@@ -1003,7 +1003,7 @@ export function PhoneApp({
                   <button
                     type="button"
                     onClick={() => onFixPermission('accessibilityEnabled')}
-                    className="px-4 py-1.5 min-h-[36px] rounded-full bg-[#15803D] hover:bg-[#166534] text-white text-[14px] font-medium whitespace-nowrap transition-colors"
+                    className="px-4 py-1.5 min-h-[36px] rounded-full bg-[#111111] hover:bg-[#27272A] text-white text-[14px] font-medium whitespace-nowrap transition-colors"
                   >
                     {t(lang, 'Enable')}
                   </button>
@@ -1019,7 +1019,7 @@ export function PhoneApp({
                   <button
                     type="button"
                     onClick={() => onFixPermission('overlayAllowed')}
-                    className="px-4 py-1.5 min-h-[36px] rounded-full bg-[#15803D] hover:bg-[#166534] text-white text-[14px] font-medium whitespace-nowrap transition-colors"
+                    className="px-4 py-1.5 min-h-[36px] rounded-full bg-[#111111] hover:bg-[#27272A] text-white text-[14px] font-medium whitespace-nowrap transition-colors"
                   >
                     {t(lang, 'Allow')}
                   </button>
@@ -1032,9 +1032,9 @@ export function PhoneApp({
           <button
             type="button"
             onClick={() => onLaunchMode('CODES')}
-            className="w-full rounded-2xl bg-white border border-[#E5E7EB] hover:border-[#15803D]/40 px-4 py-5 flex items-center gap-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-[#15803D]"
+            className="w-full rounded-2xl bg-white border border-[#E5E7EB] hover:border-[#111111]/40 px-4 py-5 flex items-center gap-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-[#111111]"
           >
-            <div className="w-12 h-12 rounded-full bg-[#ECFDF5] flex items-center justify-center shrink-0">
+            <div className="w-12 h-12 rounded-full bg-[#F4F4F5] flex items-center justify-center shrink-0">
               <AutoCodesIcon className="w-6 h-6" />
             </div>
             <div className="flex-1 min-w-0">
@@ -1045,7 +1045,7 @@ export function PhoneApp({
                 {t(lang, 'Enters Umrah codes for you')}
               </div>
             </div>
-            <div className="w-10 h-10 rounded-full bg-[#15803D] flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-full bg-[#111111] flex items-center justify-center shrink-0">
               <ArrowRight className="w-5 h-5 text-white" />
             </div>
           </button>
@@ -1054,9 +1054,9 @@ export function PhoneApp({
           <button
             type="button"
             onClick={() => onLaunchMode('QUIZ')}
-            className="w-full rounded-2xl bg-white border border-[#E5E7EB] hover:border-[#15803D]/40 px-4 py-5 flex items-center gap-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-[#15803D]"
+            className="w-full rounded-2xl bg-white border border-[#E5E7EB] hover:border-[#111111]/40 px-4 py-5 flex items-center gap-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-[#111111]"
           >
-            <div className="w-12 h-12 rounded-full bg-[#ECFDF5] flex items-center justify-center shrink-0">
+            <div className="w-12 h-12 rounded-full bg-[#F4F4F5] flex items-center justify-center shrink-0">
               <AutoQuizIcon className="w-6 h-6" />
             </div>
             <div className="flex-1 min-w-0">
@@ -1067,7 +1067,7 @@ export function PhoneApp({
                 {t(lang, 'Answers the Nusuk quiz for you')}
               </div>
             </div>
-            <div className="w-10 h-10 rounded-full bg-[#15803D] flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-full bg-[#111111] flex items-center justify-center shrink-0">
               <ArrowRight className="w-5 h-5 text-white" />
             </div>
           </button>
@@ -1106,7 +1106,7 @@ export function PhoneApp({
               className="w-full flex items-center gap-3.5 px-4 min-h-[60px] text-left hover:bg-[#FAFAFA] transition-colors"
             >
               <div className="w-10 h-10 flex items-center justify-center shrink-0">
-                <HelpCircle className="w-5 h-5 text-[#15803D]" />
+                <HelpCircle className="w-5 h-5 text-[#111111]" />
               </div>
               <span className="flex-1 text-[16px] text-[#18181B]">
                 {t(lang, 'Help & guides')}
@@ -1121,7 +1121,7 @@ export function PhoneApp({
               className="w-full flex items-center gap-3.5 px-4 min-h-[60px] text-left hover:bg-[#FAFAFA] transition-colors"
             >
               <div className="w-10 h-10 flex items-center justify-center shrink-0">
-                <Users className="w-5 h-5 text-[#15803D]" />
+                <Users className="w-5 h-5 text-[#111111]" />
               </div>
               <span className="flex-1 text-[16px] text-[#18181B]">
                 {t(lang, 'Follow on Facebook')}
