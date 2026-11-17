@@ -96,6 +96,8 @@ public class AutomationService extends AccessibilityService {
     private long lastCollectTime = 0;      // when "Add another code" was tapped
     private long restoreWaitSince = 0;     // when this run started waiting for the server history
     private long lastRestoreKick = 0;
+    private int emptyDownloadRetries = 0;
+    private long lastPeriodicSyncKick = 0;
     // After a reinstall / "Clear data" the phone has forgotten which codes it already tried.
     // Never type one until the phone's history is back from the server.
     private static final long RESTORE_WAIT_MS = 60_000;
@@ -430,6 +432,8 @@ public class AutomationService extends AccessibilityService {
         this.lastCollectTime = 0;
         this.restoreWaitSince = 0;
         this.lastRestoreKick = 0;
+        this.emptyDownloadRetries = 0;
+        this.lastPeriodicSyncKick = System.currentTimeMillis();
         this.staleErrorAtSubmit = false;
         this.staleErrorTextAtSubmit = "";
         this.sawErrorGone = false;
@@ -489,6 +493,7 @@ public class AutomationService extends AccessibilityService {
         this.quizReq++; // any reply still in flight is now stale
         this.lastQuestion = null;
         if (currentMode == AutomationMode.QUIZ) QuizBatch.flush(this, null); // send the run's last counts
+        else if (currentMode == AutomationMode.CODES) KeyRepository.getInstance(this).flushState();
         handler.removeCallbacks(loopRunnable);
         loopScheduled = false;
         notifyStopped(reason);
@@ -1029,6 +1034,11 @@ public class AutomationService extends AccessibilityService {
     private void stepCodesLoop() {
         try {
             KeyRepository repo = KeyRepository.getInstance(this);
+            long syncNow = System.currentTimeMillis();
+            if (syncNow - lastPeriodicSyncKick > 60_000) {
+                lastPeriodicSyncKick = syncNow;
+                CodeSync.syncSoon(this, 0);
+            }
 
             // A code's result (or the Congratulations page closing) is short-lived and must be
             // seen the moment it happens: read the real screen, not the node cache.
@@ -1135,7 +1145,11 @@ public class AutomationService extends AccessibilityService {
                     }
                     if (restoreWaitSince > 0) restoreWaitSince = 0;
 
-                    // currentCode is kept after a timeout so the same code is retried
+                    // currentCode is kept after a timeout so the same code is retried — unless it became globally invalid meanwhile.
+                    if (!checkSubmitted && currentCode != null && !repo.isCodeAvailable(currentCode)) {
+                        currentCode = null;
+                        codeAttempts = 0;
+                    }
                     if (currentCode == null) {
                         currentCode = repo.getNextCode();
                         codeAttempts = 0;
@@ -1146,9 +1160,21 @@ public class AutomationService extends AccessibilityService {
                             scheduleNextStep(500);
                             return;
                         }
+                        if (emptyDownloadRetries == 0) {
+                            emptyDownloadRetries = 1;
+                            CodeDownloader.start(this, true);
+                            notifyProgress("Downloading codes...");
+                            scheduleNextStep(600);
+                            return;
+                        }
+                        if (!CodeDownloader.isFullySynced(repo) || CodeDownloader.failed) {
+                            stopAutomation("Couldn't download codes. Check your internet and try again.");
+                            return;
+                        }
                         stopAutomation("All codes tested!");
                         return;
                     }
+                    emptyDownloadRetries = 0;
 
                     editText.refresh();
                     CharSequence existing = editText.getText();
@@ -1220,7 +1246,7 @@ public class AutomationService extends AccessibilityService {
                     // "Already used" = this Nusuk account has the code (not a bad code): kept apart
                     // so it's never retried and doesn't count against the code for other phones.
                     String errText = (errNode.lower + " " + errNode.descLower);
-                    boolean already = errText.contains("already");
+                    boolean already = errText.contains("already") || errText.contains("used before");
                     Log.i(TAG, (already ? "↺ Already used: " : "✗ Invalid: ") + currentCode + " [" + errText.trim() + "] ("
                             + (batchProcessed + 1) + "/" + targetBatchCount + ")");
                     if (already) repo.markAlready(currentCode); else repo.markInvalid(currentCode);
