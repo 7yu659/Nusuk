@@ -27,9 +27,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import com.nusuk.automator.R;
-import com.nusuk.automator.core.Access;
 import com.nusuk.automator.core.Http;
+import com.nusuk.automator.core.L;
 import com.nusuk.automator.core.Links;
+import com.nusuk.automator.ui.MainActivity;
+import com.nusuk.automator.update.UpdateChecker;
 
 /**
  * Announcements sent from the admin page (/admin -> Notifications), shown as system notifications.
@@ -40,6 +42,8 @@ import com.nusuk.automator.core.Links;
 public final class Notices {
     private static final String TAG = "Notices";
     static final String CHANNEL = "announcements";
+    static final String CHANNEL_UPDATES = "app_updates";
+    private static final int UPDATE_NOTIFY_ID = 9001;
     private static final int JOB_ID = 4201;
     private static final long PERIOD_MS = 15 * 60_000L;      // JobScheduler minimum
     private static final long MIN_GAP_MS = 60_000L;          // app open: at most one check a minute
@@ -149,20 +153,45 @@ public final class Notices {
         }
     }
 
-    public static int unreadCount(Context c) {
+    public static synchronized int unreadCount(Context c) {
         long read = prefs(c).getLong("readUpTo", 0);
         JSONArray h = history(c);
         int n = 0;
-        for (int i = 0; i < h.length(); i++) if (h.optJSONObject(i).optLong("id") > read) n++;
+        for (int i = 0; i < h.length(); i++) {
+            JSONObject item = h.optJSONObject(i);
+            if (item == null) continue;
+            if (item.optBoolean("isUpdate", false)) {
+                if (item.optBoolean("unread", false)) n++;
+            } else if (item.optLong("id") > read) {
+                n++;
+            }
+        }
         return n;
     }
 
     /** Marks everything saved so far as read. */
-    static void markAllRead(Context c) {
+    static synchronized void markAllRead(Context c) {
         JSONArray h = history(c);
-        long max = h.length() > 0 ? h.optJSONObject(0).optLong("id") : 0;
-        for (int i = 0; i < h.length(); i++) max = Math.max(max, h.optJSONObject(i).optLong("id"));
-        prefs(c).edit().putLong("readUpTo", max).apply();
+        long max = 0;
+        boolean changed = false;
+        for (int i = 0; i < h.length(); i++) {
+            JSONObject item = h.optJSONObject(i);
+            if (item == null) continue;
+            if (item.optBoolean("isUpdate", false)) {
+                if (item.optBoolean("unread", false)) {
+                    try {
+                        item.put("unread", false);
+                        changed = true;
+                    } catch (Exception ignored) {}
+                }
+            } else {
+                long id = item.optLong("id");
+                if (id > max) max = id;
+            }
+        }
+        SharedPreferences.Editor ed = prefs(c).edit().putLong("readUpTo", Math.max(max, prefs(c).getLong("readUpTo", 0)));
+        if (changed) ed.putString("history", h.toString());
+        ed.apply();
     }
 
     static synchronized void clearHistory(Context c) {
@@ -172,10 +201,144 @@ public final class Notices {
 
     public static void ensureChannel(Context c) {
         NotificationManager nm = c.getSystemService(NotificationManager.class);
-        if (nm == null || nm.getNotificationChannel(CHANNEL) != null) return;
-        NotificationChannel ch = new NotificationChannel(CHANNEL, "Announcements", NotificationManager.IMPORTANCE_HIGH);
-        ch.setDescription("News and updates from Nusuk Auto");
-        nm.createNotificationChannel(ch);
+        if (nm == null) return;
+        if (nm.getNotificationChannel(CHANNEL) == null) {
+            NotificationChannel ch = new NotificationChannel(CHANNEL, L.t(c, "Announcements"), NotificationManager.IMPORTANCE_HIGH);
+            ch.setDescription(L.t(c, "News and updates from Nusuk Auto"));
+            nm.createNotificationChannel(ch);
+        }
+        if (nm.getNotificationChannel(CHANNEL_UPDATES) == null) {
+            NotificationChannel uch = new NotificationChannel(CHANNEL_UPDATES, L.t(c, "App Updates"), NotificationManager.IMPORTANCE_HIGH);
+            uch.setDescription(L.t(c, "Alerts when a new version of Nusuk Auto is available"));
+            nm.createNotificationChannel(uch);
+        }
+    }
+
+    /** Records an update notice into the in-app notification feed once per unique update key. */
+    public static boolean storeUpdateNoticeIfNew(Context c, UpdateChecker.Info info) {
+        if (c == null || info == null) return false;
+        String updateKey = UpdateChecker.updateKey(info);
+        if (updateKey.isEmpty()) return false;
+        String ver = UpdateChecker.versionLabel(info);
+        String titleEn = ver.isEmpty() ? "New update available" : "New update available · " + ver;
+        String bodyEn = ver.isEmpty()
+                ? "A fresh version of Nusuk Auto is ready with important fixes and improvements. Tap to update now."
+                : "A fresh version of Nusuk Auto (" + ver + ") is ready with important fixes and improvements. Tap to update now.";
+        boolean added = storeUpdateNotice(c, updateKey, titleEn, bodyEn, info.url);
+        if (added) {
+            Runnable cb = onChange;
+            if (cb != null) cb.run();
+        }
+        return added;
+    }
+
+    private static synchronized boolean storeUpdateNotice(Context c, String updateKey, String titleEn, String bodyEn, String url) {
+        try {
+            SharedPreferences p = prefs(c);
+            if (updateKey.equals(p.getString("lastUpdateNoticeKey", ""))) {
+                return false;
+            }
+            JSONArray old = new JSONArray(p.getString("history", "[]"));
+            long id = -((Math.abs((long) updateKey.hashCode()) % 1_000_000L) + 1L);
+            JSONArray out = new JSONArray();
+            out.put(new JSONObject()
+                    .put("id", id)
+                    .put("isUpdate", true)
+                    .put("unread", true)
+                    .put("updateKey", updateKey)
+                    .put("title", titleEn)
+                    .put("body", bodyEn)
+                    .put("url", url != null ? url : "")
+                    .put("at", System.currentTimeMillis() / 1000));
+            for (int i = 0; i < old.length() && out.length() < HISTORY_MAX; i++) {
+                JSONObject prev = old.optJSONObject(i);
+                if (prev == null) continue;
+                if (prev.optBoolean("isUpdate", false) && updateKey.equals(prev.optString("updateKey", ""))) continue;
+                if (prev.optLong("id") == id) continue;
+                out.put(prev);
+            }
+            p.edit()
+                    .putString("lastUpdateNoticeKey", updateKey)
+                    .putString("history", out.toString())
+                    .apply();
+            return true;
+        } catch (Exception e) {
+            Log.w(TAG, "Update notice not saved: " + e);
+            return false;
+        }
+    }
+
+    /** Shows a high-priority system notification and records an unread in-app notice for the new release. */
+    public static void notifyUpdateAvailable(Context c, UpdateChecker.Info info) {
+        if (c == null || info == null) return;
+        storeUpdateNoticeIfNew(c, info);
+
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        if (nm == null) return;
+        ensureChannel(c);
+
+        String ver = UpdateChecker.versionLabel(info);
+        String titleEn = ver.isEmpty() ? "New update available" : "New update available · " + ver;
+        String bodyEn = ver.isEmpty()
+                ? "A fresh version of Nusuk Auto is ready with important fixes and improvements. Tap to update now."
+                : "A fresh version of Nusuk Auto (" + ver + ") is ready with important fixes and improvements. Tap to update now.";
+        String title = L.t(c, titleEn);
+        String body = L.t(c, bodyEn);
+
+        Intent openApp = new Intent(c, MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent tapPi = PendingIntent.getActivity(c, UPDATE_NOTIFY_ID, openApp,
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+
+        PendingIntent actionPi = tapPi;
+        if (Links.isTrusted(info.url)) {
+            Intent dlIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(info.url))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            actionPi = PendingIntent.getActivity(c, UPDATE_NOTIFY_ID + 1, dlIntent,
+                    PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        }
+
+        Notification.Builder b = new Notification.Builder(c, CHANNEL_UPDATES)
+                .setSmallIcon(R.drawable.ic_notify)
+                .setColor(c.getColor(R.color.primary))
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(new Notification.BigTextStyle().bigText(body))
+                .setCategory(Notification.CATEGORY_RECOMMENDATION)
+                .setAutoCancel(true)
+                .setOnlyAlertOnce(true)
+                .setContentIntent(tapPi)
+                .addAction(new Notification.Action.Builder(null, L.t(c, "Update now"), actionPi).build());
+        try {
+            nm.notify("update", UPDATE_NOTIFY_ID, b.build());
+            Log.i(TAG, "Shown update notification for " + ver);
+        } catch (SecurityException e) {
+            Log.w(TAG, "Update notification not allowed: " + e);
+        }
+    }
+
+    /** Clears the system update notification and marks update alerts read once the app is up to date. */
+    public static synchronized void cancelUpdateNotification(Context c) {
+        if (c == null) return;
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        if (nm != null) nm.cancel("update", UPDATE_NOTIFY_ID);
+        try {
+            SharedPreferences p = prefs(c);
+            JSONArray h = new JSONArray(p.getString("history", "[]"));
+            boolean changed = false;
+            for (int i = 0; i < h.length(); i++) {
+                JSONObject item = h.optJSONObject(i);
+                if (item != null && item.optBoolean("isUpdate", false) && item.optBoolean("unread", false)) {
+                    item.put("unread", false);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                p.edit().putString("history", h.toString()).apply();
+                Runnable cb = onChange;
+                if (cb != null) cb.run();
+            }
+        } catch (Exception ignored) {}
     }
 
     private static void show(Context c, JSONObject n) {

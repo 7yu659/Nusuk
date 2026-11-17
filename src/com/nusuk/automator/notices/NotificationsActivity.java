@@ -15,6 +15,7 @@ import com.nusuk.automator.R;
 import com.nusuk.automator.core.L;
 import com.nusuk.automator.core.Links;
 import com.nusuk.automator.ui.ScreenActivity;
+import com.nusuk.automator.update.UpdateChecker;
 
 /** Every announcement sent from the server, newest first (kept on the phone). */
 public class NotificationsActivity extends ScreenActivity {
@@ -81,7 +82,8 @@ public class NotificationsActivity extends ScreenActivity {
     }
 
     private void addItem(JSONObject n, int index) {
-        boolean unread = n.optLong("id") > readUpTo;
+        boolean isUpdate = n.optBoolean("isUpdate", false);
+        boolean unread = isUpdate ? n.optBoolean("unread", false) : n.optLong("id") > readUpTo;
         String url = n.optString("url", "");
         boolean link = Links.isTrusted(url);
 
@@ -106,10 +108,21 @@ public class NotificationsActivity extends ScreenActivity {
         if (!body.isEmpty()) col.addView(text(body, 16, 0xFF44403C), lp(-2, -2, 4));
         long at = n.optLong("at", 0) * 1000;
         String when = at > 0 ? DateUtils.getRelativeTimeSpanString(at, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString() : "";
-        if (link) when += (when.isEmpty() ? "" : "  ·  ") + "Tap to open";
+        if (isUpdate) when += (when.isEmpty() ? "" : "  ·  ") + "Tap to update";
+        else if (link) when += (when.isEmpty() ? "" : "  ·  ") + "Tap to open";
         if (!when.isEmpty()) col.addView(text(when, 13, getColor(R.color.text_secondary)), lp(-2, -2, 8));
 
-        if (link) {
+        if (isUpdate) {
+            row.setClickable(true);
+            row.setFocusable(true);
+            row.setOnClickListener(v -> {
+                if (UpdateChecker.isBlocked(this)) {
+                    UpdateChecker.autoCheck(this, null, true);
+                } else {
+                    UpdateChecker.manualCheck(this, null);
+                }
+            });
+        } else if (link) {
             row.setClickable(true);
             row.setFocusable(true);
             row.setOnClickListener(v -> Links.open(this, url));
