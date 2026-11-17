@@ -142,14 +142,14 @@ public class MainActivity extends Activity implements KeyRepository.ChangeListen
         int total = Math.max(CodeDownloader.serverTotal, have);
         TextView status = findViewById(R.id.tvCodesStatus), pct = findViewById(R.id.tvCodesPct);
         android.widget.ProgressBar bar = findViewById(R.id.codesBar);
-        if (CodeDownloader.running && (have == 0 || have < total)) {
+        if (CodeDownloader.running && (have == 0 || !CodeDownloader.isFullySynced(repo) || have < total)) {
             banner.setVisibility(View.VISIBLE);
             banner.setOnClickListener(null);
             status.setText(L.t(this, have == 0 ? "Downloading codes\u2026" : "Updating codes\u2026"));
             bar.setVisibility(View.VISIBLE);
             bar.setProgress(total > 0 ? (int) (have * 1000L / total) : 0);
             pct.setText(total > 0 ? L.t(this, String.format(java.util.Locale.US, "%,d / %,d", have, total)) : "");
-        } else if (CodeDownloader.failed && have == 0 && !repo.hasRunnableCodes()) {
+        } else if (CodeDownloader.failed && !CodeDownloader.isFullySynced(repo) && !repo.hasRunnableCodes()) {
             banner.setVisibility(View.VISIBLE);
             status.setText(L.t(this, "Couldn\u2019t download codes. Tap to retry"));
             pct.setText("");
@@ -345,7 +345,12 @@ public class MainActivity extends Activity implements KeyRepository.ChangeListen
                     Toast.makeText(this, L.t(this, "Codes are still downloading\u2026"), Toast.LENGTH_SHORT).show();
                     return;
                 }
-                CodeDownloader.start(this, false);
+                if (!CodeDownloader.isFullySynced(repo)) {
+                    CodeDownloader.start(this, true);
+                    updateCodesBanner();
+                    Toast.makeText(this, L.t(this, "Downloading codes\u2026"), Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 showNoCodesDialog();
                 return;
             }
