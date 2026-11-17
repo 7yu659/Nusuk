@@ -24,7 +24,7 @@ public final class QuizSync {
 
     private QuizSync() {}
 
-    public static synchronized void syncSoon(Context context) {
+    public static void syncSoon(Context context) {
         final Context ctx = context.getApplicationContext();
         if (running || System.currentTimeMillis() - lastRun < MIN_GAP_MS) return;
         running = true;
@@ -33,26 +33,20 @@ public final class QuizSync {
                 SharedPreferences p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
                 long since = p.getLong("since", 0);
                 QuizStore store = QuizStore.get(ctx);
-                boolean ok = true;
-                boolean caughtUp = false;
-                for (int page = 0; page < 100; page++) {
+                for (int page = 0; page < 20; page++) {
                     JSONObject body = new JSONObject();
                     body.put("since", since);
                     QuizSolver.Result r = QuizSolver.post(ctx, "/api/quiz/answers", body, 10_000);
                     if (r.status < 200 || r.status >= 300) {
                         Log.w(TAG, "HTTP " + r.status + " " + r.body.optString("error"));
-                        ok = false;
                         break;
                     }
                     store.applyServer(r.body.optJSONArray("answers"));
                     since = r.body.optLong("cursor", since);
                     p.edit().putLong("since", since).apply();
-                    if (!r.body.optBoolean("more")) {
-                        caughtUp = true;
-                        break;
-                    }
+                    if (!r.body.optBoolean("more")) break;
                 }
-                if (ok && caughtUp) lastRun = System.currentTimeMillis();
+                lastRun = System.currentTimeMillis();
                 Log.i(TAG, "Shared answers on this phone: " + store.serverCount());
             } catch (Exception e) {
                 Log.w(TAG, "Sync failed: " + e);

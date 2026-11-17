@@ -65,23 +65,9 @@ public class QuizSolver {
         return r;
     }
 
-    /** A refusal the app should act on (4xx client/limit denial with a "code"), not a server outage or 404/308. */
+    /** A refusal the app should act on (has a "code"), as opposed to a transient error. */
     static boolean isDenial(Result r) {
-        return r != null && r.status >= 400 && r.status < 500
-                && r.status != 404 && r.status != 408
-                && r.body != null && r.body.has("code");
-    }
-
-    private static String extractErrorMessage(JSONObject body, String fallback) {
-        if (body == null) return fallback;
-        Object err = body.opt("error");
-        if (err instanceof String && !((String) err).trim().isEmpty()) return ((String) err).trim();
-        if (err instanceof JSONObject) {
-            String m = ((JSONObject) err).optString("message", "").trim();
-            if (!m.isEmpty()) return m;
-        }
-        String msg = body.optString("message", "").trim();
-        return msg.isEmpty() ? fallback : msg;
+        return r.status >= 400 && r.body.has("code");
     }
 
     /** `wrong`: options Nusuk already marked wrong for this question; the server's AI avoids them. */
@@ -109,11 +95,11 @@ public class QuizSolver {
                     Log.i(TAG, "Worker answer: '" + answer + "' (cached=" + cached + ", left=" + r.body.opt("left") + ")");
                     mainHandler.post(() -> callback.onSuccess(answer, cached));
                 } else if (isDenial(r)) {
-                    String code = r.body.optString("code"), msg = extractErrorMessage(r.body, "Play Quiz is not available.");
+                    String code = r.body.optString("code"), msg = r.body.optString("error", "Play Quiz is not available.");
                     Log.w(TAG, "Quiz denied: " + code + " " + msg);
                     mainHandler.post(() -> callback.onDenied(code, msg));
                 } else {
-                    String err = "HTTP " + r.status + ": " + extractErrorMessage(r.body, "");
+                    String err = "HTTP " + r.status + ": " + r.body.optString("error", "");
                     Log.e(TAG, err);
                     mainHandler.post(() -> callback.onError(err));
                 }
@@ -136,14 +122,10 @@ public class QuizSolver {
                 Result r = post(ctx, path, payload, 8000);
                 if (r.status >= 200 && r.status < 300) {
                     mainHandler.post(() -> callback.onResult(r.body));
-                } else if (isDenial(r)) {
-                    String code = r.body.optString("code", "DENIED");
-                    String msg = extractErrorMessage(r.body, "Play Quiz isn't available right now.");
-                    mainHandler.post(() -> callback.onFailure(code, msg));
                 } else {
-                    String msg = extractErrorMessage(r.body, "Server unavailable (HTTP " + r.status + ").");
-                    Log.w(TAG, path + " server unavailable: HTTP " + r.status);
-                    mainHandler.post(() -> callback.onFailure("SERVER_UNAVAILABLE", msg));
+                    String code = r.body.optString("code", "HTTP_" + r.status);
+                    String msg = r.body.optString("error", "Something went wrong. Please try again.");
+                    mainHandler.post(() -> callback.onFailure(code, msg));
                 }
             } catch (Exception e) {
                 Log.e(TAG, path + " failed", e);
