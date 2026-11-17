@@ -28,35 +28,48 @@ public final class Http {
         }
     }
 
-    /** POSTs `payload` to api_base + path. Throws on network errors; HTTP errors come back as a status. */
+    /** POSTs `payload` to api_base + path. Follows HTTP redirects (including 307/308). Throws on network errors. */
     public static Response postJson(Context ctx, String path, JSONObject payload, int connectMs, int readMs) throws Exception {
         byte[] bytes = payload.toString().getBytes(StandardCharsets.UTF_8);
-        HttpURLConnection conn = (HttpURLConnection) new URL(ctx.getString(R.string.api_base) + path).openConnection();
-        try {
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
-            conn.setRequestProperty("Accept", "application/json");
-            conn.setRequestProperty("X-Device-Id", Access.deviceId(ctx));
-            conn.setConnectTimeout(connectMs);
-            conn.setReadTimeout(readMs);
-            conn.setDoOutput(true);
-            conn.setFixedLengthStreamingMode(bytes.length);
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(bytes);
-            }
-            int status = conn.getResponseCode();
-            InputStream in = status < 400 ? conn.getInputStream() : conn.getErrorStream();
-            StringBuilder sb = new StringBuilder();
-            if (in != null) {
-                try (BufferedReader br = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-                    char[] buf = new char[16384];
-                    int n;
-                    while ((n = br.read(buf)) > 0) sb.append(buf, 0, n);
+        String deviceId = Access.deviceId(ctx);
+        URL url = new URL(ctx.getString(R.string.api_base) + path);
+        for (int hop = 0; hop < 5; hop++) {
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            try {
+                conn.setInstanceFollowRedirects(false);
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                conn.setRequestProperty("Accept", "application/json");
+                conn.setRequestProperty("X-Device-Id", deviceId);
+                conn.setConnectTimeout(connectMs);
+                conn.setReadTimeout(readMs);
+                conn.setDoOutput(true);
+                conn.setFixedLengthStreamingMode(bytes.length);
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(bytes);
                 }
+                int status = conn.getResponseCode();
+                if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
+                    String loc = conn.getHeaderField("Location");
+                    if (loc != null && !loc.isEmpty()) {
+                        url = new URL(url, loc);
+                        continue;
+                    }
+                }
+                InputStream in = status < 400 ? conn.getInputStream() : conn.getErrorStream();
+                StringBuilder sb = new StringBuilder();
+                if (in != null) {
+                    try (BufferedReader br = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+                        char[] buf = new char[16384];
+                        int n;
+                        while ((n = br.read(buf)) > 0) sb.append(buf, 0, n);
+                    }
+                }
+                return new Response(status, sb.toString());
+            } finally {
+                conn.disconnect();
             }
-            return new Response(status, sb.toString());
-        } finally {
-            conn.disconnect();
         }
+        throw new Exception("Too many redirects");
     }
 }

@@ -180,6 +180,23 @@ public class KeyRepository {
         return new ArrayList<>(m.values());
     }
 
+    /** True if at least one untested priority, downloaded, or user-added code is available to run. */
+    public boolean hasRunnableCodes() {
+        if (!loaded) return false;
+        synchronized (this) {
+            for (String code : priorityCodes()) {
+                String u = code.toUpperCase(Locale.US);
+                if (successCodes.contains(u) || alreadyCodes.contains(u) || deferredCodes.contains(u)) continue;
+                if (invalidCodes.contains(u) && priorityRechecked.contains(u)) continue;
+                return true;
+            }
+            for (String code : allCodes) {
+                if (isUntried(code)) return true;
+            }
+            return false;
+        }
+    }
+
     public synchronized String getNextCode() {
         for (String code : priorityCodes()) {
             String u = code.toUpperCase(Locale.US);
@@ -274,6 +291,38 @@ public class KeyRepository {
     /** Cursor of the code download (server key id); 0 = nothing downloaded yet. */
     synchronized long codesCursor() {
         return codesCursor;
+    }
+
+    /** Saves user-pasted codes locally so Auto Add Codes works even if the server is unavailable. */
+    public int addLocalCodes(List<String> keys, List<String> addedOut, List<String> duplicateOut) {
+        if (keys == null || keys.isEmpty()) return 0;
+        int added = 0;
+        synchronized (this) {
+            if (codeKeys == null) {
+                codeKeys = new HashSet<>(allCodes.size() * 2 + keys.size());
+                for (String c : allCodes) codeKeys.add(c.toUpperCase(Locale.US));
+            }
+            for (String raw : keys) {
+                if (raw == null) continue;
+                String c = raw.trim();
+                if (c.length() != 11 || !c.regionMatches(true, 0, "NG-", 0, 3)) continue;
+                c = "NG-" + c.substring(3);
+                if (codeKeys.add(c.toUpperCase(Locale.US))) {
+                    allCodes.add(c);
+                    added++;
+                    if (addedOut != null) addedOut.add(c);
+                } else {
+                    if (duplicateOut != null) duplicateOut.add(c);
+                }
+            }
+            if (added > 0) {
+                remainingCache = -1;
+                saveCodes();
+                saveState();
+            }
+        }
+        if (added > 0) notifyListeners();
+        return added;
     }
 
     /** Adds a downloaded page (new keys only, letter case ignored) and saves it with the new cursor. */

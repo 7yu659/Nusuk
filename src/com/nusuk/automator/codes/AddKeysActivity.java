@@ -1,5 +1,6 @@
 package com.nusuk.automator.codes;
 
+import android.content.Context;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
@@ -88,7 +89,7 @@ public class AddKeysActivity extends ScreenActivity {
             return;
         }
         if (p.keys.isEmpty()) {
-            show(p, new KeySubmit.Result());
+            show(p, new KeySubmit.Result(), false);
             return;
         }
         busy = true;
@@ -96,19 +97,31 @@ public class AddKeysActivity extends ScreenActivity {
         submit.setAlpha(0.6f);
         final List<String> keys = new ArrayList<>(p.keys);
         new Thread(() -> {
-            KeySubmit.Result r = KeySubmit.submit(getApplicationContext(), keys);
+            Context app = getApplicationContext();
+            List<String> localAdded = new ArrayList<>();
+            List<String> localDup = new ArrayList<>();
+            KeyRepository.getInstance(app).addLocalCodes(keys, localAdded, localDup);
+            KeySubmit.Result r = KeySubmit.submit(app, keys);
+            final boolean localFallback = r.error != null;
+            if (localFallback) {
+                r.added.clear();
+                r.duplicate.clear();
+                r.added.addAll(localAdded);
+                r.duplicate.addAll(localDup);
+                r.error = null;
+            }
             main.post(() -> {
                 busy = false;
                 submit.setText(L.t(this, "Add codes"));
                 submit.setAlpha(1f);
                 if (isFinishing() || isDestroyed()) return;
-                show(p, r);
-                if (!r.added.isEmpty()) CodeDownloader.start(getApplicationContext(), true); // bring them into this phone's list too
+                show(p, r, localFallback);
+                if (!localFallback && !r.added.isEmpty()) CodeDownloader.start(app, true); // bring them into this phone's list too
             });
         }, "key-submit").start();
     }
 
-    private void show(KeySubmit.Parsed p, KeySubmit.Result r) {
+    private void show(KeySubmit.Parsed p, KeySubmit.Result r, boolean localFallback) {
         results.removeAllViews();
         List<String> dup = new ArrayList<>(r.duplicate);
         dup.addAll(p.repeated);
@@ -119,6 +132,8 @@ public class AddKeysActivity extends ScreenActivity {
             showMessage("NETWORK".equals(r.error) ? "Could not reach the server. Check your internet and try again."
                     : r.error.startsWith("SERVER ") ? "The server could not add the codes right now (error " + r.error.substring(7) + "). Please try again later."
                     : r.error, 0xFFB91C1C);
+        } else if (localFallback) {
+            showMessage("Saved on this phone for Auto Add Codes (server is currently unavailable).", 0xFF15803D);
         }
         if (!r.added.isEmpty()) group("✓  " + r.added.size() + " new code" + (r.added.size() == 1 ? "" : "s") + " added. Thank you!", r.added, 0xFF15803D);
         if (!dup.isEmpty()) group("＝  " + dup.size() + " already in the list", dup, 0xFFB45309);

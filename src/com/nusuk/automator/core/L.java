@@ -484,6 +484,12 @@ public final class L {
                 "Nusuk Auto-টি Fynex (fynex.site)-এর অধীনে ইব্রাহিম খলিল তৈরি ও পরিচালনা করেন, যাতে ওমরাহ যাত্রীরা সহজে নুসুক কোড ও কুইজ অটোমেট করতে পারেন।");
         x("This helper is independent and not affiliated with the Nusuk app or the Ministry of Hajj and Umrah.",
                 "এই অ্যাপটি সম্পূর্ণ স্বাধীন এবং নুসুক অ্যাপ বা হজ ও ওমরাহ মন্ত্রণালয়ের সঙ্গে এর কোনো সম্পর্ক নেই।");
+        x("Loading codes...", "কোড লোড হচ্ছে...");
+        x("Retry", "আবার চেষ্টা করো");
+        x("No untested codes left on this phone. Paste your own codes or retry downloading from the server.",
+                "এই ফোনে পরীক্ষা করার মতো আর কোনো নতুন কোড বাকি নেই। নিজের কোড পেস্ট করো অথবা সার্ভার থেকে আবার ডাউনলোডের চেষ্টা করো।");
+        x("Saved on this phone for Auto Add Codes (server is currently unavailable).",
+                "সার্ভার এখন চালু না থাকায় কোডগুলো অটো কোড অ্যাডের জন্য এই ফোনেই সেভ করা হয়েছে।");
         r("Update required \\((.+)\\)", "আপডেট আবশ্যক ($1)");
         x("1", "১");
         x("2", "২");

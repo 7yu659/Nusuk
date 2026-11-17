@@ -1092,8 +1092,9 @@ public class AutomationService extends AccessibilityService {
                     if (currentCode == null && repo.needsRestore() && restoreWaitSince >= 0) {
                         long now = System.currentTimeMillis();
                         if (restoreWaitSince == 0) restoreWaitSince = now;
-                        if (now - restoreWaitSince > RESTORE_WAIT_MS) {
-                            Log.w(TAG, "Used-code history not loaded after " + RESTORE_WAIT_MS + "ms -> continuing without it");
+                        boolean syncFailed = CodeSync.lastSyncFailed && (now - restoreWaitSince > 3000);
+                        if (syncFailed || now - restoreWaitSince > RESTORE_WAIT_MS) {
+                            Log.w(TAG, (syncFailed ? "Used-code sync unavailable" : "Used-code history not loaded after " + RESTORE_WAIT_MS + "ms") + " -> continuing without it");
                             notifyProgress("Couldn't load your used codes, continuing");
                             restoreWaitSince = -1; // don't wait again this run
                             scheduleNextStep(300);

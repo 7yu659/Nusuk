@@ -44,6 +44,7 @@ public final class CodeSync {
     private static long retryMs = RETRY_MIN_MS;
     private static final long DEAD_CHECK_MS = 30 * 60_000; // shared dead list: refresh at least this often
     private static volatile long lastDeadCheck = 0;
+    public static volatile boolean lastSyncFailed = false;
 
     private CodeSync() {}
 
@@ -91,8 +92,10 @@ public final class CodeSync {
                 JSONObject r = post(ctx, repo, new ArrayList<>(), new ArrayList<>(), new ArrayList<>(), false);
                 if (r.optBoolean("deadMore")) syncSoon(ctx, 2000);
             }
+            lastSyncFailed = false;
             retryMs = RETRY_MIN_MS;
         } catch (Exception e) {
+            lastSyncFailed = true;
             Log.w(TAG, "Sync failed, retry in " + (retryMs / 1000) + "s: " + e);
             long wait = retryMs;
             retryMs = Math.min(RETRY_MAX_MS, retryMs * 2);

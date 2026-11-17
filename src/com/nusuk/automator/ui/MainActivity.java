@@ -47,6 +47,7 @@ public class MainActivity extends Activity implements KeyRepository.ChangeListen
     private TextView tvQuizStat;
     private TextView tvQuizReset;
     private JSONObject quizStatus;      // last /api/quiz/status reply (null = unknown)
+    private boolean quizLaunching = false;
     private AlertDialog limitDialog;
     private TextView tvAppVersion, tvBellBadge;
     private String langAtCreate;
@@ -125,17 +126,19 @@ public class MainActivity extends Activity implements KeyRepository.ChangeListen
     @Override
     protected void onPause() {
         super.onPause();
+        quizLaunching = false;
         OverlayService.setAppOpen(false);
         rowAccessibility.removeCallbacks(recheckPermissions);
         Notices.onChange = null;
         CodeDownloader.onProgress = null;
     }
 
-    /** Compact progress while the code list downloads; a retry line if it failed and there are no codes. */
+    /** Compact progress while the code list downloads; a retry line if it failed and no runnable codes exist. */
     private void updateCodesBanner() {
         View banner = findViewById(R.id.codesBanner);
         if (banner == null) return;
-        int have = KeyRepository.getInstance(this).getTotalCount();
+        KeyRepository repo = KeyRepository.getInstance(this);
+        int have = repo.getTotalCount();
         int total = Math.max(CodeDownloader.serverTotal, have);
         TextView status = findViewById(R.id.tvCodesStatus), pct = findViewById(R.id.tvCodesPct);
         android.widget.ProgressBar bar = findViewById(R.id.codesBar);
@@ -146,7 +149,7 @@ public class MainActivity extends Activity implements KeyRepository.ChangeListen
             bar.setVisibility(View.VISIBLE);
             bar.setProgress(total > 0 ? (int) (have * 1000L / total) : 0);
             pct.setText(total > 0 ? L.t(this, String.format(java.util.Locale.US, "%,d / %,d", have, total)) : "");
-        } else if (CodeDownloader.failed && have == 0) {
+        } else if (CodeDownloader.failed && have == 0 && !repo.hasRunnableCodes()) {
             banner.setVisibility(View.VISIBLE);
             status.setText(L.t(this, "Couldn\u2019t download codes. Tap to retry"));
             pct.setText("");
@@ -206,19 +209,28 @@ public class MainActivity extends Activity implements KeyRepository.ChangeListen
         QuizSolver.fetchStatus(this, new QuizSolver.JsonCallback() {
             @Override
             public void onResult(JSONObject json) {
+                quizLaunching = false;
                 quizStatus = json;
                 Links.saveGroupUrl(MainActivity.this, json.optString("groupUrl", ""));
                 showResetTime(json);
-                if (then != null) then.run();
+                if (then != null && !isFinishing() && !isDestroyed()) then.run();
             }
 
             @Override
             public void onFailure(String code, String message) {
-                if (isFinishing()) return;
+                quizLaunching = false;
+                if (isFinishing() || isDestroyed()) return;
                 quizStatus = null;
+                boolean offlineOrServerDown = "NETWORK".equals(code) || "SERVER_UNAVAILABLE".equals(code);
                 if (then != null) {
-                    if ("NETWORK".equals(code)) Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
-                    else showLimitDialog(message);
+                    if (offlineOrServerDown) {
+                        // Server unreachable or down: allow Play Quiz via the bundled local answer DB.
+                        launch("QUIZ");
+                    } else if ("QUIZ_OFF".equals(code)) {
+                        Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+                    } else {
+                        showLimitDialog(message);
+                    }
                 }
             }
         });
@@ -230,6 +242,8 @@ public class MainActivity extends Activity implements KeyRepository.ChangeListen
             return;
         }
         if (quizStatus == null) {
+            if (quizLaunching) return;
+            quizLaunching = true;
             refreshQuizStatus(this::decidePlayQuiz);
         } else {
             decidePlayQuiz();
@@ -282,6 +296,19 @@ public class MainActivity extends Activity implements KeyRepository.ChangeListen
                 .show();
     }
 
+    /** Shown only when neither priority/user-added codes nor server codes are left to try. */
+    private void showNoCodesDialog() {
+        if (isFinishing() || isDestroyed()) return;
+        if (limitDialog != null && limitDialog.isShowing()) limitDialog.dismiss();
+        limitDialog = new AlertDialog.Builder(this)
+                .setTitle(L.t(this, "Auto Add Codes"))
+                .setMessage(L.t(this, "No untested codes left on this phone. Paste your own codes or retry downloading from the server."))
+                .setPositiveButton(L.t(this, "Add your own codes"), (d, w) -> startActivity(new Intent(this, AddKeysActivity.class)))
+                .setNeutralButton(L.t(this, "Retry"), (d, w) -> CodeDownloader.start(this, true))
+                .setNegativeButton(L.t(this, "Cancel"), null)
+                .show();
+    }
+
     private void updateRunning() {
         AutomationService s = AutomationService.getInstance();
         boolean running = s != null && s.isRunning();
@@ -304,14 +331,24 @@ public class MainActivity extends Activity implements KeyRepository.ChangeListen
             UpdateChecker.autoCheck(this, this::renderVersionBadge);
             return;
         }
-        if ("CODES".equals(mode) && !KeyRepository.getInstance(this).isLoaded()) {
-            Toast.makeText(this, L.t(this, "Loading codes\u2026"), Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if ("CODES".equals(mode) && KeyRepository.getInstance(this).getTotalCount() == 0) {
-            Toast.makeText(this, L.t(this, CodeDownloader.running ? "Codes are still downloading\u2026" : "No codes yet. Connect to the internet and tap the banner to retry."), Toast.LENGTH_SHORT).show();
-            CodeDownloader.start(this, false);
-            return;
+        if ("CODES".equals(mode)) {
+            KeyRepository repo = KeyRepository.getInstance(this);
+            if (!repo.isLoaded()) {
+                Toast.makeText(this, L.t(this, "Loading codes\u2026"), Toast.LENGTH_SHORT).show();
+                repo.whenLoaded(() -> runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) launch(mode);
+                }));
+                return;
+            }
+            if (!repo.hasRunnableCodes()) {
+                if (CodeDownloader.running) {
+                    Toast.makeText(this, L.t(this, "Codes are still downloading\u2026"), Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                CodeDownloader.start(this, false);
+                showNoCodesDialog();
+                return;
+            }
         }
         if (!isNusukInstalled()) {
             Toast.makeText(this, L.t(this, "Install the Nusuk app first"), Toast.LENGTH_SHORT).show();
