@@ -5,9 +5,9 @@
             <group android:name="emblem" android:pivotX="144" android:pivotY="144" android:scaleX="0.7" android:scaleY="0.7">
                 <group android:translateX="69" android:translateY="69" android:scaleX="3.125" android:scaleY="3.125">
                     <path
-                        android:strokeColor="#BBF7D0"
+                        android:strokeColor="#D4D4D8"
                         android:strokeWidth="1.6"
-                        android:fillColor="#15803D"
+                        android:fillColor="#111111"
                         android:pathData="M15,3.8 H33 A11.2,11.2 0 0 1 44.2,15 V33 A11.2,11.2 0 0 1 33,44.2 H15 A11.2,11.2 0 0 1 3.8,33 V15 A11.2,11.2 0 0 1 15,3.8 Z" />
                     <path
                         android:name="arch"
@@ -20,7 +20,7 @@
                     <path
                         android:name="key"
                         android:trimPathEnd="0"
-                        android:strokeColor="#DCFCE7"
+                        android:strokeColor="#E4E4E7"
                         android:strokeWidth="2.4"
                         android:strokeLineCap="round"
                         android:strokeLineJoin="round"

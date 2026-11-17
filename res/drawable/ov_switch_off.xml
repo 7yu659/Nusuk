@@ -3,14 +3,14 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="#0F2E1E" />
+            <solid android:color="#09090B" />
             <corners android:radius="9dp" />
-            <stroke android:width="1dp" android:color="#2E6B4B" />
+            <stroke android:width="1dp" android:color="#3F3F46" />
         </shape>
     </item>
     <item android:width="12dp" android:height="12dp" android:gravity="start|center_vertical" android:start="3dp">
         <shape android:shape="oval">
-            <solid android:color="#86B89D" />
+            <solid android:color="#71717A" />
         </shape>
     </item>
 </layer-list>

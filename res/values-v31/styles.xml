@@ -7,7 +7,7 @@
         <item name="android:windowBackground">@color/background</item>
         <item name="android:fontFamily">@font/plex</item>
         <item name="android:textViewStyle">@style/Txt</item>
-        <item name="android:windowSplashScreenBackground">#14532D</item>
+        <item name="android:windowSplashScreenBackground">#000000</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon_animated</item>
         <item name="android:windowSplashScreenAnimationDuration">900</item>
     </style>

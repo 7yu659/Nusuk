@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Minimal Emerald Green Theme -->
-    <color name="primary">#15803D</color>
-    <color name="primary_dark">#14532D</color>
-    <color name="background">#F6F7F6</color>
+    <!-- Minimal Black Theme -->
+    <color name="primary">#111111</color>
+    <color name="primary_dark">#000000</color>
+    <color name="background">#F7F7F7</color>
     <color name="text_primary">#18181B</color>
     <color name="text_secondary">#71717A</color>
-    <color name="hero_label">#CCECFDF5</color>
+    <color name="hero_label">#CCE4E4E7</color>
     <color name="gold_light">#FFFFFF</color>
     <color name="warn_text">#92400E</color>
 </resources>
