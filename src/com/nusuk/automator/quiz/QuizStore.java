@@ -489,7 +489,7 @@ public final class QuizStore extends SQLiteOpenHelper {
      * Matches a stored answer string against the current on-screen options, returning an option
      * ONLY if it matches unambiguously (not in `bad`).
      */
-    static String matchUniqueOption(String storedAnswer, List<String> options, Set<String> bad) {
+    public static String matchUniqueOption(String storedAnswer, List<String> options, Set<String> bad) {
         if (storedAnswer == null || options == null || options.isEmpty()) return null;
         String an = norm(storedAnswer);
         String ac = canonical(storedAnswer);
