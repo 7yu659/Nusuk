@@ -1,10 +1,16 @@
 package com.nusuk.automator.core;
 
+import android.app.Activity;
+import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.View;
 import android.widget.Toast;
+
+import java.io.File;
 
 /** Outside links and sharing helpers shared across every screen. */
 public final class Links {
@@ -21,6 +27,7 @@ public final class Links {
     public static final String COMPANY_NAME = "Fynex";
     /** Fallback link shared when APK file sharing isn't supported by the target app. */
     public static final String SHARE_URL = FB_PROFILE_URL;
+    private static volatile boolean sharingApk = false;
 
     private Links() {}
 
@@ -76,8 +83,50 @@ public final class Links {
         open(c, WHATSAPP_URL);
     }
 
-    /** Shares the official app link so recipients can download cleanly from the verified release source. */
+    /** Shares the installed APK file directly via ApkShareProvider, falling back to the download link if unavailable. */
     public static void share(Context c) {
+        if (c == null || sharingApk) return;
+        sharingApk = true;
+        final Context app = c.getApplicationContext();
+        final Handler main = new Handler(Looper.getMainLooper());
+        new Thread(() -> {
+            File apk = null;
+            try {
+                apk = ApkShareProvider.prepareApkFile(app);
+            } catch (Exception ignored) {}
+            final boolean hasApk = apk != null && apk.exists() && apk.length() > 0;
+            main.post(() -> {
+                sharingApk = false;
+                if (c instanceof Activity) {
+                    Activity act = (Activity) c;
+                    if (act.isFinishing() || act.isDestroyed()) return;
+                }
+                if (hasApk) {
+                    try {
+                        Uri apkUri = ApkShareProvider.contentUri(app);
+                        String shareCaption = L.isBn(app)
+                                ? "নুসুক অ্যাপের কোড আর কুইজ নিজে থেকেই করে দেয় Nusuk Auto।\nফাইলটি ইনস্টল করে ব্যবহার করো।"
+                                : "Nusuk Auto adds Umrah codes and plays the Nusuk quiz for you.\nInstall this APK to get started.";
+                        Intent sendApk = new Intent(Intent.ACTION_SEND)
+                                .setType(ApkShareProvider.MIME_APK)
+                                .putExtra(Intent.EXTRA_STREAM, apkUri)
+                                .putExtra(Intent.EXTRA_SUBJECT, ApkShareProvider.fileName(app))
+                                .putExtra(Intent.EXTRA_TEXT, shareCaption)
+                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        sendApk.setClipData(ClipData.newRawUri(ApkShareProvider.fileName(app), apkUri));
+                        Intent chooser = Intent.createChooser(sendApk, L.t(app, "Share the app"));
+                        chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        if (!(c instanceof Activity)) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        c.startActivity(chooser);
+                        return;
+                    } catch (Exception ignored) {}
+                }
+                shareLinkFallback(c);
+            });
+        }, "apk-share").start();
+    }
+
+    private static void shareLinkFallback(Context c) {
         String link = GITHUB_RELEASES_URL;
         String msg = L.isBn(c)
                 ? "নুসুক অ্যাপের কোড আর কুইজ নিজে থেকেই করে দেয় Nusuk Auto।\nডাউনলোড: " + link + "\nকমিউনিটি: " + SHARE_URL
@@ -87,6 +136,7 @@ public final class Links {
                 .setType("text/plain")
                 .putExtra(Intent.EXTRA_SUBJECT, "Nusuk Auto")
                 .putExtra(Intent.EXTRA_TEXT, msg);
+        if (!(c instanceof Activity)) sendText.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
             c.startActivity(Intent.createChooser(sendText, L.t(c, "Share the app")));
         } catch (Exception e) {
