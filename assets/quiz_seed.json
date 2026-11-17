@@ -125,7 +125,6 @@
   "which two surahs are sunnah to recite in the two rak ahs of tawaf": "Al-Kafirun and Al-Ikhlas",
   "in which year of the hijra was fasting in ramadan made obligatory": "The second year",
   "how did the people of medina receive the prophet when he arrived": "With great joy, such as they had never felt for anything",
-  "who are the muhajirun emigrants": "The companions who migrated from Mecca to Medina",
   "which well did uthman ibn affan buy and dedicate for the muslims": "The Well of Rumah",
   "in which city was the prophet muhammad born": "Mecca",
   "in which year was the prophet muhammad born": "The Year of the Elephant",
@@ -303,6 +302,9 @@
   ],
   "which well did uthman ibn affan buy and dedicate for the muslims": [
    "The well of Aris"
+  ],
+  "who are the muhajirun emigrants": [
+   "The companions who migrated from Mecca to Medina"
   ]
  }
 }
