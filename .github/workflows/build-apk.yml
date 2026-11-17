@@ -117,14 +117,17 @@ jobs:
               --out "$OUT/nusuk-auto.apk" \
               "$OUT/aligned.apk"
           else
-            echo "WARNING: Permanent keystore secrets not set. Falling back to temporary debug keystore (configure ANDROID_KEYSTORE_BASE64/PASS/ALIAS secrets to keep a stable publisher signature for Play Protect)."
-            keytool -genkeypair -keystore "$OUT/debug.keystore" -storepass android -keypass android -alias debug \
-              -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Ebrahim Khalil"
+            echo "Permanent keystore secrets not set; using fixed publisher signing keystore so updates install cleanly without package conflicts."
+            printf '%s' 'MIIKWgIBAzCCChAGCSqGSIb3DQEHAaCCCgEEggn9MIIJ+TCCBFIGCSqGSIb3DQEHBqCCBEMwggQ/AgEAMIIEOAYJKoZIhvcNAQcBMFcGCSqGSIb3DQEFDTBKMCkGCSqGSIb3DQEFDDAcBAhpAtzE791kiwICCAAwDAYIKoZIhvcNAgkFADAdBglghkgBZQMEASoEEFhITRNuqnEIzYu097GQ6lCAggPQrjJR0TjnZ1TgEj/DaNg9AKPP17EVJc5oWJJNQm6t0M6gMoMo5EOiIIXH0h0ghZfywm+inF0per7XKMPYiAVlpee9BOU664oygGjXWMJemRS8RKRXEqbsdaHg0JMogH1U/8zM4k3KAVqPlC0YklE52pwU3hBqjN+zxiOtmy6p02DpP3QIsyROwviKXbLwYPmhjTYRMnExotkUZDGb79fegolCDYaL2m4f21DampBe+td6/Bndjl6mT1w8WQBzRUostQ0MGa30UDvuoEdIMTEM0tCOB4yh8RFrxuwM4SWTMDx3Fl+tvtQeGDCN7cJ97iIn68FMdOoSFL9DavufGLd9BvnNfsQrf2LyuAsJzafUQA5Sxd3GE8cOFgI2qkryo+2lXQp7kP+YIMwRbac+QAiBhEGp2xe6xXy+RD3BEs34scW3/Fu/o3iXcCp6Eixy0rgbbkZMyHQ9xS/FAM1hABYSKeGQzX/qyRXkk2qq1NTBhEv0PgI/vz8kM7EmWCg2B+dl8WlzM+6rMoxdIPf/f6CkISMVrnth4TCRUzOs2i6/KGKgAzmoZnpi6BGD8nruA3cULotfntjQcyDnBlv/mcn/9UqG3wo0uvsU247vbEKdVSBF+4bPN7X2teVt3aNU7w1J8vQ8+JBT+57mQEXj0mdRBe7z4XncDrLq4NzNh/9I90lLtJpWR7piphccciQcCpS5Yf7pVQu7mrZTdy69JfmEeWDhHRqI11R+Jse+WVBj0xOUYEVO4VQxIwv5SBC8vfyzYg3Wwcwh9SCLuzS/psTa1orjygf6vZxJRzFg5gEEgBE/dA121+ogNqwFyhi09uIXIBxbVJ1F4FpzaZl3Y6NTLptxwI3zHRkCbuaKqJ0hP94yaUtX6SVfvCDtHVqh4n6aMGnuZZpStZe2fmk8KNuRaRxxmXEzsiP3Z4w2hJubjQMmhQLj1KjttJwR1+EWRZjEvU+it8gNqdqUbLUHpQXZD3OGS2N+2ZK1cgSl/BVVwOzBFgZHZchjv8F5UjpIhO6YrV/tQRb+9SZtRgLHm5LvPNiaKynzOVkgk8ZafwYVmhZ3zej/qQdw4FEajnyB1HdeQCUhRwfWjYpjIeidNgALamI4ztsq0a7qapPyVWSgv2yGoA8vU2GDxvdZDa+GXt3pp7NKUh0ArMKeS6SJ5UqCQBd6bxD2nZGQ8/sbAualH/iiC5CpuT2PaLdq4e/PrUgkeDbk/86rd61ctjuQ7qxFjVfQcAm6nWUneob+x8MHdhdZCjVL0XF6vv6ulArnzPdHUpLT6YZv+3kokcp7usd/hDCCBZ8GCSqGSIb3DQEHAaCCBZAEggWMMIIFiDCCBYQGCyqGSIb3DQEMCgECoIIFMTCCBS0wVwYJKoZIhvcNAQUNMEowKQYJKoZIhvcNAQUMMBwECBfLQMN7VloIAgIIADAMBggqhkiG9w0CCQUAMB0GCWCGSAFlAwQBKgQQBStbWQlfdkD3+8jvnW3Y4ASCBNCbZ8eeB4oN3ylN48LbKBmBJU6kEpRyyNx/KDCVf8b26KPIJwA+WlheLBVU5MCCOGKyq/R9NsNA7y1EdVZsLCjPfPaQGD0EsbkXBseVsb/F/EBUfRdOq0hrAoxDGRn+FBrYjdnPRfGZAJ9jm63sXAmQVRoDhWmMhiZUjfcovQAXkfTxmcGteMH8iZwla47iwEtsgmclK+0GCpQ7lhRWhDXQVVN8crl8aCnvbdJMm9wRVIVvpbJxgbnR12yBQNhnsMJ9sAJS5PPBEUgz26zsVtqmQSlAdua2QK9H8M+YTICQylTptu+Lz8Qey0QZ77dSoZFV2IqOov6CqqfuR9t30lIw9NprPoYM64NiKQyft4O9mjHAh8nRNg3V0RiAJDninYwr3RxlT7E2oFQWGtWiRA1VG+XB9Ijeyqew3x6gF1OLL1A7z3um5dgqgxHjt7fGoV5el+U0QfbH29B6qomK5QDgK83u8JOJoiENz33MNPI8IlQ7v+9WsRZA9PRKO9cevEctFXIQ4ra2S71HmMb/TxUjXE2ows+SpU5cscEnmhqRHLA7q2Bo5uJaVg7AC1vieq9XOJh9f/kaRRUuzl7to1lgKWFoPngIDGqoEglJadVqchBmIS+4oaMryXgGdUbHbM1AIhnKmVuDgTAAadqbuuF8Xe8wRALROqxeqUB1N7zM1DwcCrFeYGfPv96MHW5mS3s8M6iLvm5LDBpzxGD0+Yq6Af4pGE7TvKuiLLy+eGweWugvGDgLS+qpxU4DFgSKnwhWkpMkMPoc5fXw4AlDgzzMUA5ZlEGO2B2Pz5b9K/OnXUGrr8I94zgN6kHJd9Gml16aRGSPGXWOtSz8AQrlPBkNcA1MdcK6HV6sBJGHJirYv9G94QxrI/FYEjxyqTod59wfzakHGWKnZ7frFxrBRT/yfdeug96G+YqeBuKOCov4dCQDuj3cDF4zgruCtiSU/iUtYwycN9jteEMzK04FonrEqMdB7vPYtMALdNdwPpSbg2g8GWMEOyFTjbZiLemizPCaQc25Kyd2t9L4KTmg9BVFXGnS4OFO/3pioCDGkDwec98hnf1WWS5O5uvLQ0WTuv+ftCfe9388BSsdEGQoKRPD1UutuakCYvWjkcEup1s71AA+PkBnGsoAUs9hK6iy5xm7eOJe6E8gqs0KxET2H97ZHyqAnsqjYBY5fW8XFA1SQC0VGKuklm7as+nxdAV55z2mt4kugBTm4I7iiCrLOyS7sSxsTshf0gMpz2P9fHBRg+PCdMBixRAhdTgCExrPuVUDdPSMLtHxMdg/UNcLc6y8YQ31umfTgN3D6KbhcgLoxj8gIOmDMfvrP4wIReO8wSFN4hMQ2yeYGOsrC/rxg+L+tCbm8zHS3sQ2Hkk7db6xW630yjtJ/u2fSnDx76k+/kMzo2hay3R0NwsERKBYq86rc2kE+XbSl625qc0ooVAHYA1tYQ8pq9O6m+WGWJ3Io5nf02JzOji0beEBpvPEWUEqyv91eThGCMEPc+CrbLflWWMqEZTjI+/YDZ8n92uxNYC6wzj64HAYnjdx8apPryF46YcCqHYiDo5c/lmQ9kn8kys9XBy9cVVi5oS4QFMJ69SeZFi1viM69tGJWeV32hVsluD5pUEPiAeSOHfVDoqnPDFAMBkGCSqGSIb3DQEJFDEMHgoAbgB1AHMAdQBrMCMGCSqGSIb3DQEJFTEWBBSEi12DKZw7URB+fmjRGtTfLMRDizBBMDEwDQYJYIZIAWUDBAIBBQAEIAdC5FHzHwVem2XGeXE22gFUDH1/h0e0tb1MR1FlMsbqBAiXWtFPyxsf1gICCAA=' | base64 --decode > "$OUT/fallback.p12"
             "$TOOLS/apksigner" sign \
               --v1-signing-enabled true \
               --v2-signing-enabled true \
               --v3-signing-enabled true \
-              --ks "$OUT/debug.keystore" --ks-pass pass:android \
+              --ks "$OUT/fallback.p12" \
+              --ks-type PKCS12 \
+              --ks-key-alias nusuk \
+              --ks-pass pass:android \
+              --key-pass pass:android \
               --out "$OUT/nusuk-auto.apk" "$OUT/aligned.apk"
           fi
 
@@ -138,7 +141,7 @@ jobs:
             "forceUpdate": true,
             "url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/nusuk-auto.apk",
             "htmlUrl": "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}",
-            "notes": "Build #${GITHUB_RUN_NUMBER} pushed to GitHub.",
+            "notes": "Important update (Build #${GITHUB_RUN_NUMBER}). Bug fixes and improvements.",
             "sha256": "${SHA256}"
           }
           EOF
@@ -167,7 +170,7 @@ jobs:
             --latest \
             --target "$GITHUB_SHA" \
             --title "$RELEASE_TITLE" \
-            --notes "Mandatory update build #${GITHUB_RUN_NUMBER} from ${GITHUB_SHA}."
+            --notes "Important update (Build #${GITHUB_RUN_NUMBER}). Bug fixes and improvements."
 
       - name: Sync version.json fallback to repository branch
         if: github.event_name == 'push'
