@@ -8,6 +8,7 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -20,25 +21,36 @@ import com.nusuk.automator.core.Http;
 
 /**
  * Pulls the shared code database into {@link KeyRepository}.
- * Tries the configured API endpoint (/api/app/codes) first, and falls back directly to the
- * Firebase Firestore database (nusukhub / nusuk_codes) so all database codes are always fetched.
+ * Downloads BOTH:
+ * 1) Firestore (nusukhub / nusuk_codes) ordered newest-first (createdAt DESC), so recently
+ *    uploaded data-page codes are placed at the front and tried first.
+ * 2) The full /api/app/codes database (all 50-60k+ / 134k+ pages until done=true), retrying
+ *    transient errors per page so every code in the database is guaranteed to be fetched.
  */
 public final class CodeDownloader {
     private static final String TAG = "CodeDownloader";
     private static final long RECHECK_MS = 15 * 60 * 1000L;
-    private static final String FIRESTORE_CODES_URL =
-            "https://firestore.googleapis.com/v1/projects/nusukhub/databases/(default)/documents/nusuk_codes";
+    private static final String FIRESTORE_DOCUMENTS_URL =
+            "https://firestore.googleapis.com/v1/projects/nusukhub/databases/(default)/documents";
+    private static final String FIRESTORE_CODES_URL = FIRESTORE_DOCUMENTS_URL + "/nusuk_codes";
+    private static final String FIRESTORE_RUN_QUERY_URL = FIRESTORE_DOCUMENTS_URL + ":runQuery";
     private static final Pattern VALID_CODE = Pattern.compile("^NG-[A-Za-z0-9]{8}$", Pattern.CASE_INSENSITIVE);
 
     public static volatile boolean running = false;
     public static volatile boolean failed = false;
+    public static volatile boolean firestoreSynced = false;
     public static volatile int serverTotal = 0;
     public static volatile Runnable onProgress; // set by the screen that shows progress (any thread)
     private static volatile long lastDone = 0;
 
     private CodeDownloader() {}
 
-    /** Starts a download if the list is empty, or the last full check is old. `force` skips the age check. */
+    /** True once the entire /api/app/codes database AND Firestore have completed syncing cleanly. */
+    public static boolean isFullySynced(KeyRepository repo) {
+        return repo != null && repo.isLoaded() && repo.isApiCodesDone() && firestoreSynced && repo.getTotalCount() > 0;
+    }
+
+    /** Starts a download if the list is incomplete, or the last full check is old. `force` skips the age check. */
     public static synchronized void start(Context ctx, boolean force) {
         if (running) return;
         Context app = ctx.getApplicationContext();
@@ -47,8 +59,8 @@ public final class CodeDownloader {
             repo.whenLoaded(() -> start(app, force));
             return;
         }
-        boolean empty = repo.getTotalCount() == 0;
-        if (!force && !empty && System.currentTimeMillis() - lastDone < RECHECK_MS) return;
+        boolean incomplete = !isFullySynced(repo);
+        if (!force && !incomplete && System.currentTimeMillis() - lastDone < RECHECK_MS) return;
         running = true;
         failed = false;
         changed();
@@ -56,20 +68,46 @@ public final class CodeDownloader {
     }
 
     private static void run(Context ctx, KeyRepository repo) {
+        boolean fsOk = false;
+        boolean apiOk = false;
+        List<String> firestoreCodes = new ArrayList<>();
+        List<String> pinnedCodes = new ArrayList<>();
+        long prevCursor = repo.codesCursor();
+        boolean wasApiDone = repo.isApiCodesDone();
+
         try {
-            boolean apiOk = false;
+            try {
+                fsOk = fetchFromFirestore(firestoreCodes, pinnedCodes);
+                if (fsOk) {
+                    firestoreSynced = true;
+                    boolean forcePromote = (repo.getTotalCount() == 0) || !wasApiDone;
+                    repo.applyFirestoreCodes(firestoreCodes, pinnedCodes, forcePromote);
+                }
+            } catch (Exception fsErr) {
+                Log.w(TAG, "Firestore code fetch failed: " + fsErr.getMessage());
+            }
+
             try {
                 apiOk = fetchFromApi(ctx, repo);
             } catch (Exception apiErr) {
-                Log.w(TAG, "API code fetch failed, falling back to Firestore: " + apiErr.getMessage());
+                Log.w(TAG, "API code fetch failed: " + apiErr.getMessage());
             }
 
-            if (!apiOk || repo.getTotalCount() == 0) {
-                fetchFromFirestore(repo);
+            // On an initial or resumed bulk API download, re-promote Firestore newest codes to index 0
+            // so the most recently uploaded data-page codes are tried right before bulk API codes.
+            if (fsOk && !firestoreCodes.isEmpty() && (!wasApiDone || prevCursor == 0)) {
+                repo.applyFirestoreCodes(firestoreCodes, pinnedCodes, true);
             }
 
-            lastDone = System.currentTimeMillis();
-            Log.i(TAG, "Code list up to date: " + repo.getTotalCount() + " codes");
+            if (fsOk && apiOk && repo.isApiCodesDone()) {
+                lastDone = System.currentTimeMillis();
+                failed = false;
+            } else {
+                // Only mark failed if neither source managed anything or the API bulk list is still incomplete.
+                failed = !repo.isApiCodesDone() || (!fsOk && !apiOk);
+            }
+            Log.i(TAG, "Code sync finished: total=" + repo.getTotalCount()
+                    + ", fsOk=" + fsOk + ", apiOk=" + apiOk + ", apiDone=" + repo.isApiCodesDone());
         } catch (Exception e) {
             Log.w(TAG, "Code download failed", e);
             failed = true;
@@ -81,9 +119,8 @@ public final class CodeDownloader {
 
     private static boolean fetchFromApi(Context ctx, KeyRepository repo) throws Exception {
         long after = repo.codesCursor();
-        int pulled = 0;
         while (true) {
-            JSONObject r = post(ctx, after);
+            JSONObject r = postWithRetry(ctx, after, 3);
             JSONArray arr = r.optJSONArray("codes");
             List<String> page = new ArrayList<>();
             if (arr != null) {
@@ -94,23 +131,88 @@ public final class CodeDownloader {
                 }
             }
             long last = r.optLong("last", after);
-            serverTotal = r.optInt("total", serverTotal);
-            pulled += page.size();
-            repo.appendCodes(page, last);
+            boolean done = r.optBoolean("done", true);
+            serverTotal = Math.max(serverTotal, r.optInt("total", serverTotal));
+            repo.prependApiPage(page, last, done);
             after = last;
             changed();
-            if (r.optBoolean("done", true) || page.isEmpty()) break;
+            if (done || page.isEmpty()) break;
         }
-        return pulled > 0 || repo.getTotalCount() > 0;
+        return repo.isApiCodesDone();
     }
 
-    private static void fetchFromFirestore(KeyRepository repo) throws Exception {
-        String pageToken = "";
-        int fetched = 0;
-        List<String> priority = new ArrayList<>();
-        int guard = 0;
+    private static JSONObject postWithRetry(Context ctx, long after, int maxAttempts) throws Exception {
+        Exception lastErr = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return post(ctx, after);
+            } catch (Exception e) {
+                lastErr = e;
+                Log.w(TAG, "API codes page after=" + after + " attempt " + attempt + " failed: " + e.getMessage());
+                if (attempt < maxAttempts) {
+                    try { Thread.sleep(800L * attempt); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); throw e; }
+                }
+            }
+        }
+        throw lastErr;
+    }
 
-        while (guard++ < 200) { // up to 60,000 codes safely
+    private static boolean fetchFromFirestore(List<String> outCodes, List<String> outPinned) throws Exception {
+        try {
+            fetchFirestoreOrdered(outCodes, outPinned);
+            return true;
+        } catch (Exception queryErr) {
+            Log.w(TAG, "Firestore runQuery failed, falling back to document list: " + queryErr.getMessage());
+            outCodes.clear();
+            outPinned.clear();
+            fetchFirestoreUnordered(outCodes, outPinned);
+            return true;
+        }
+    }
+
+    /** Fetches Firestore `nusuk_codes` ordered by `createdAt DESCENDING` (newest-first). */
+    private static void fetchFirestoreOrdered(List<String> outCodes, List<String> outPinned) throws Exception {
+        final int pageSize = 500;
+        int offset = 0;
+        int guard = 0;
+        while (guard++ < 500) { // up to 250,000 docs
+            JSONObject select = new JSONObject().put("fields", new JSONArray()
+                    .put(new JSONObject().put("fieldPath", "code"))
+                    .put(new JSONObject().put("fieldPath", "status"))
+                    .put(new JSONObject().put("fieldPath", "isPinned")));
+            JSONObject order = new JSONObject()
+                    .put("field", new JSONObject().put("fieldPath", "createdAt"))
+                    .put("direction", "DESCENDING");
+            JSONObject structured = new JSONObject()
+                    .put("from", new JSONArray().put(new JSONObject().put("collectionId", "nusuk_codes")))
+                    .put("select", select)
+                    .put("orderBy", new JSONArray().put(order))
+                    .put("offset", offset)
+                    .put("limit", pageSize);
+            JSONObject payload = new JSONObject().put("structuredQuery", structured);
+
+            JSONArray rows = postFirestoreQueryWithRetry(payload, 2);
+            int docCount = 0;
+            for (int i = 0; i < rows.length(); i++) {
+                JSONObject row = rows.optJSONObject(i);
+                if (row == null) continue;
+                JSONObject doc = row.optJSONObject("document");
+                if (doc == null) continue;
+                docCount++;
+                collectFirestoreDoc(doc, outCodes, outPinned);
+            }
+            serverTotal = Math.max(serverTotal, outCodes.size());
+            changed();
+            if (docCount < pageSize) break;
+            offset += docCount;
+        }
+        Log.i(TAG, "Firestore ordered sync complete: " + outCodes.size() + " valid codes (" + outPinned.size() + " pinned)");
+    }
+
+    private static void fetchFirestoreUnordered(List<String> outCodes, List<String> outPinned) throws Exception {
+        String pageToken = "";
+        int guard = 0;
+        while (guard++ < 1000) { // up to 300,000 codes safely
             StringBuilder url = new StringBuilder(FIRESTORE_CODES_URL)
                     .append("?pageSize=300")
                     .append("&mask.fieldPaths=code")
@@ -122,41 +224,81 @@ public final class CodeDownloader {
 
             JSONObject r = getJson(url.toString());
             JSONArray docs = r.optJSONArray("documents");
-            List<String> page = new ArrayList<>();
             if (docs != null) {
                 for (int i = 0; i < docs.length(); i++) {
                     JSONObject doc = docs.optJSONObject(i);
-                    if (doc == null) continue;
-                    JSONObject fields = doc.optJSONObject("fields");
-                    if (fields == null) continue;
-                    String code = strField(fields, "code");
-                    if (!VALID_CODE.matcher(code).matches()) continue;
-                    code = "NG-" + code.substring(3);
-                    page.add(code);
-
-                    boolean pinned = boolField(fields, "isPinned");
-                    String status = strField(fields, "status");
-                    if (pinned || "verified".equalsIgnoreCase(status)) {
-                        priority.add(code);
-                    }
+                    if (doc != null) collectFirestoreDoc(doc, outCodes, outPinned);
                 }
             }
-
-            fetched += page.size();
-            serverTotal = Math.max(serverTotal, fetched);
-            if (!page.isEmpty()) {
-                repo.appendCodes(page, repo.codesCursor());
-            }
+            serverTotal = Math.max(serverTotal, outCodes.size());
             changed();
 
             pageToken = r.optString("nextPageToken", "").trim();
             if (pageToken.isEmpty() || docs == null || docs.length() == 0) break;
         }
+        Log.i(TAG, "Firestore list sync complete: " + outCodes.size() + " valid codes (" + outPinned.size() + " pinned)");
+    }
 
-        if (!priority.isEmpty()) {
-            repo.onPriority(priority);
+    private static void collectFirestoreDoc(JSONObject doc, List<String> outCodes, List<String> outPinned) {
+        JSONObject fields = doc.optJSONObject("fields");
+        if (fields == null) return;
+        String status = strField(fields, "status");
+        if ("invalid".equalsIgnoreCase(status) || "dead".equalsIgnoreCase(status)) return;
+        String code = strField(fields, "code");
+        if (!VALID_CODE.matcher(code).matches()) return;
+        code = "NG-" + code.substring(3);
+        outCodes.add(code);
+        if (boolField(fields, "isPinned")) {
+            outPinned.add(code);
         }
-        Log.i(TAG, "Firestore sync complete: fetched " + fetched + " valid codes (" + priority.size() + " priority)");
+    }
+
+    private static JSONArray postFirestoreQueryWithRetry(JSONObject payload, int maxAttempts) throws Exception {
+        Exception lastErr = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return postFirestoreQuery(payload);
+            } catch (Exception e) {
+                lastErr = e;
+                if (attempt < maxAttempts) {
+                    try { Thread.sleep(600L * attempt); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); throw e; }
+                }
+            }
+        }
+        throw lastErr;
+    }
+
+    private static JSONArray postFirestoreQuery(JSONObject payload) throws Exception {
+        byte[] bytes = payload.toString().getBytes(StandardCharsets.UTF_8);
+        HttpURLConnection conn = (HttpURLConnection) new URL(FIRESTORE_RUN_QUERY_URL).openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+        conn.setRequestProperty("Accept", "application/json");
+        conn.setConnectTimeout(10_000);
+        conn.setReadTimeout(25_000);
+        conn.setDoOutput(true);
+        conn.setFixedLengthStreamingMode(bytes.length);
+        try {
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(bytes);
+            }
+            int status = conn.getResponseCode();
+            java.io.InputStream in = status < 400 ? conn.getInputStream() : conn.getErrorStream();
+            StringBuilder sb = new StringBuilder();
+            if (in != null) {
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+                    char[] buf = new char[16384];
+                    int n;
+                    while ((n = br.read(buf)) > 0) sb.append(buf, 0, n);
+                }
+            }
+            if (status != 200) throw new Exception("Firestore query HTTP " + status);
+            String body = sb.toString().trim();
+            if (body.isEmpty()) return new JSONArray();
+            return new JSONArray(body);
+        } finally {
+            conn.disconnect();
+        }
     }
 
     private static String strField(JSONObject fields, String name) {
@@ -176,7 +318,7 @@ public final class CodeDownloader {
         conn.setRequestProperty("Accept", "application/json");
         conn.setInstanceFollowRedirects(true);
         conn.setConnectTimeout(10_000);
-        conn.setReadTimeout(20_000);
+        conn.setReadTimeout(25_000);
         try {
             int status = conn.getResponseCode();
             java.io.InputStream in = status < 400 ? conn.getInputStream() : conn.getErrorStream();
@@ -201,7 +343,7 @@ public final class CodeDownloader {
     }
 
     private static JSONObject post(Context ctx, long after) throws Exception {
-        Http.Response r = Http.postJson(ctx, "/api/app/codes", new JSONObject().put("after", after), 6_000, 10_000);
+        Http.Response r = Http.postJson(ctx, "/api/app/codes", new JSONObject().put("after", after), 12_000, 30_000);
         if (r.status != 200) throw new Exception("HTTP " + r.status);
         return new JSONObject(r.body);
     }

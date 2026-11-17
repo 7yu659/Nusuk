@@ -11,16 +11,19 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 import com.nusuk.automator.stats.Stats;
 
 public class KeyRepository {
     private static final String TAG = "KeyRepo";
     private static final String STATE_FILE = "keys_state.json";
+    private static final int CODES_ORDER_VERSION = 2; // 2 = newest-first sequential order
+    private static final Pattern VALID_CODE = Pattern.compile("^NG-[A-Za-z0-9]{8}$", Pattern.CASE_INSENSITIVE);
     /**
-     * Tried before anything else, once per phone (a tested code is never tried again). The server
-     * can add more: /api/app/progress returns the keys marked priority in the web DB.
+     * Tried before anything else, once per phone (a tested or globally-invalid code is never tried again).
      */
     private static final String[] PRIORITY_CODES = {"NG-WO4DFqSh", "NG-qlVHTrFa"};
     private static KeyRepository instance;
@@ -34,20 +37,27 @@ public class KeyRepository {
     private final Set<String> successCodes = new LinkedHashSet<>();
     private final Set<String> invalidCodes = new LinkedHashSet<>();
     // Nusuk said "already used": this account added the code before (another phone, by hand, an
-    // older install). Never tried again, but not counted as added by this app.
+    // older install). Never tried again for this user, and NEVER marks the code invalid for others.
     private final Set<String> alreadyCodes = new LinkedHashSet<>();
     // Shared list from the server: codes that failed on several phones and never worked anywhere.
     private final Set<String> deadCodes = new HashSet<>();
+    // Shared list from Firestore (invalid_codes): any code marked invalid (not "already used") by ANY user.
+    private final Set<String> globalInvalidCodes = new LinkedHashSet<>();
+    private final Set<String> pendingFirestoreInvalid = new LinkedHashSet<>();
+    private String firestoreInvalidSince = "";
     private long deadSince = 0;       // server cursor for dead-list changes
     private final List<ChangeListener> listeners = new java.util.concurrent.CopyOnWriteArrayList<>();
-    private final Random picker = new Random();
     private Set<String> codeKeys = null; // upper-case copy of allCodes, for de-duplicating downloads
     private long codesCursor = 0;    // server key id the downloaded list is complete up to
+    private boolean apiCodesDone = false; // true only once /api/app/codes has returned done=true
+    private int codesOrderVersion = CODES_ORDER_VERSION;
     private int remainingCache = -1;  // untested codes in the current list; -1 = recount
+    private int scanHint = 0;        // lowest candidate index in allCodes for O(1) sequential newest-first scan
     // Codes that got no answer this session; not persisted, so they are tried again later.
     private final Set<String> deferredCodes = new HashSet<>();
-    // Priority keys last received from the server (persisted), tried before the main list.
+    // Priority keys last received from the server & Firestore pinned list (persisted).
     private final List<String> serverPriority = new ArrayList<>();
+    private final List<String> firestorePinned = new ArrayList<>();
     // Results not yet backed up to the server (persisted, so a kill never loses them).
     private final Set<String> pendingSuccess = new LinkedHashSet<>();
     private final Set<String> pendingInvalid = new LinkedHashSet<>();
@@ -55,8 +65,6 @@ public class KeyRepository {
     // false until this install has pulled its history from the server (after reinstall) and
     // pushed everything it already had (first run of a version with backup).
     private boolean restored = false;
-    // Priority codes already given their one re-check after being marked invalid (persisted).
-    private final Set<String> priorityRechecked = new HashSet<>();
 
     // The saved state (about 20k codes) is parsed on a background thread so the first screen
     // doesn't wait for it. The loader holds this object's lock while it works, so every
@@ -157,9 +165,7 @@ public class KeyRepository {
             if (remainingCache < 0) {
                 int n = 0;
                 for (String c : allCodes) {
-                    String u = c.toUpperCase(Locale.US); // once per code
-                    if (!successCodes.contains(u) && !invalidCodes.contains(u) && !alreadyCodes.contains(u)
-                            && !deadCodes.contains(u)) n++;
+                    if (isUntriedExceptDefer(c)) n++;
                 }
                 remainingCache = n;
             }
@@ -172,10 +178,11 @@ public class KeyRepository {
         return successCodes.contains(norm) || invalidCodes.contains(norm) || alreadyCodes.contains(norm);
     }
 
-    /** Priority keys (bundled + from the server) in try order, no duplicates. */
+    /** Priority keys (bundled + Firestore pinned + from the server) in try order, no duplicates. */
     private List<String> priorityCodes() {
         LinkedHashMap<String, String> m = new LinkedHashMap<>();
         for (String c : PRIORITY_CODES) m.put(c.toUpperCase(Locale.US), c);
+        for (String c : firestorePinned) m.putIfAbsent(c.toUpperCase(Locale.US), c);
         for (String c : serverPriority) m.putIfAbsent(c.toUpperCase(Locale.US), c);
         return new ArrayList<>(m.values());
     }
@@ -185,10 +192,7 @@ public class KeyRepository {
         if (!loaded) return false;
         synchronized (this) {
             for (String code : priorityCodes()) {
-                String u = code.toUpperCase(Locale.US);
-                if (successCodes.contains(u) || alreadyCodes.contains(u) || deferredCodes.contains(u)) continue;
-                if (invalidCodes.contains(u) && priorityRechecked.contains(u)) continue;
-                return true;
+                if (isUntried(code)) return true;
             }
             for (String code : allCodes) {
                 if (isUntried(code)) return true;
@@ -197,43 +201,53 @@ public class KeyRepository {
         }
     }
 
+    /** True if `code` can still be attempted on this phone right now. */
+    public synchronized boolean isCodeAvailable(String code) {
+        return code != null && !code.trim().isEmpty() && isUntried(code);
+    }
+
     public synchronized String getNextCode() {
         for (String code : priorityCodes()) {
-            String u = code.toUpperCase(Locale.US);
-            if (successCodes.contains(u) || alreadyCodes.contains(u) || deferredCodes.contains(u)) continue;
-            // A priority code marked invalid gets ONE more try: a misread (an old error line,
-            // a slow answer) must not cost a user the codes everyone is meant to get.
-            if (invalidCodes.contains(u)) {
-                if (priorityRechecked.contains(u)) continue;
-                priorityRechecked.add(u);
-                invalidCodes.remove(u);
-                pendingInvalid.remove(u);
-                remainingCache = -1;
-                saveState();
-                Log.i(TAG, "Re-checking priority code " + code + " (was marked invalid)");
-            }
-            return code;
+            if (isUntried(code)) return code;
         }
-        // Main list: a random untested code every time, never the next one in line, so no two
-        // phones (or two runs on one phone) work through the codes in the same order.
+        // Main list is kept newest-first: pick sequentially from the top (index 0) onward,
+        // never skipping an untried code and never repeating a tested or globally-invalid code.
         int n = allCodes.size();
         if (n == 0) return null;
-        for (int tries = 0; tries < 64; tries++) {
-            String code = allCodes.get(picker.nextInt(n));
-            if (isUntried(code)) return code;
+        int start = Math.max(0, Math.min(scanHint, n));
+        for (int i = start; i < n; i++) {
+            String code = allCodes.get(i);
+            if (isUntried(code)) {
+                scanHint = i;
+                return code;
+            }
         }
-        // Mostly tested already: walk from a random start so the pick is still spread out.
-        int start = picker.nextInt(n);
-        for (int k = 0; k < n; k++) {
-            String code = allCodes.get((start + k) % n);
-            if (isUntried(code)) return code;
+        for (int i = 0; i < start; i++) {
+            String code = allCodes.get(i);
+            if (isUntried(code)) {
+                scanHint = i;
+                return code;
+            }
         }
+        scanHint = n;
         return null;
+    }
+
+    private boolean isUntriedExceptDefer(String code) {
+        String u = code.toUpperCase(Locale.US);
+        return !successCodes.contains(u)
+                && !invalidCodes.contains(u)
+                && !alreadyCodes.contains(u)
+                && !deadCodes.contains(u)
+                && !globalInvalidCodes.contains(u);
     }
 
     private boolean isUntried(String code) {
         String u = code.toUpperCase(Locale.US);
-        return !isTested(code) && !deferredCodes.contains(u) && !deadCodes.contains(u);
+        return !isTested(code)
+                && !deferredCodes.contains(u)
+                && !deadCodes.contains(u)
+                && !globalInvalidCodes.contains(u);
     }
 
     public synchronized void defer(String code) {
@@ -243,7 +257,7 @@ public class KeyRepository {
     public void markSuccess(String code) {
         if (code == null) return;
         synchronized (this) {
-            String c = code.toUpperCase(Locale.US);
+            String c = code.trim().toUpperCase(Locale.US);
             if (successCodes.add(c)) Stats.codeAdded(context);
             invalidCodes.remove(c);
             alreadyCodes.remove(c);
@@ -257,11 +271,11 @@ public class KeyRepository {
         notifyListeners(); // outside the lock: listeners may call back into the repository
     }
 
-    /** Nusuk: "already used" = this account has this code. Skipped from now on, on every phone sync. */
+    /** Nusuk: "already used" = this account has this code. Skipped on this user only, never marked invalid globally. */
     public void markAlready(String code) {
         if (code == null) return;
         synchronized (this) {
-            String c = code.toUpperCase(Locale.US);
+            String c = code.trim().toUpperCase(Locale.US);
             if (successCodes.contains(c)) return;
             invalidCodes.remove(c);
             pendingInvalid.remove(c);
@@ -273,17 +287,22 @@ public class KeyRepository {
         notifyListeners();
     }
 
+    /** Nusuk: invalid (not "already used") = bad everywhere. Blocked locally + pushed globally immediately. */
     public void markInvalid(String code) {
         if (code == null) return;
         synchronized (this) {
-            String c = code.toUpperCase(Locale.US);
+            String c = code.trim().toUpperCase(Locale.US);
             if (!successCodes.contains(c) && !alreadyCodes.contains(c)) {
                 invalidCodes.add(c);
+                deadCodes.add(c);
+                globalInvalidCodes.add(c);
                 pendingInvalid.add(c);
+                boolean queuedFs = VALID_CODE.matcher(c).matches() && pendingFirestoreInvalid.add(c);
+                scanHint = 0;
+                remainingCache = -1;
+                CodeSync.syncSoon(context, queuedFs ? CodeSync.FAST_PUSH_DELAY_MS : CodeSync.PUSH_DELAY_MS);
+                saveState();
             }
-            remainingCache = -1;
-            CodeSync.syncSoon(context, CodeSync.PUSH_DELAY_MS);
-            saveState();
         }
         notifyListeners();
     }
@@ -293,29 +312,33 @@ public class KeyRepository {
         return codesCursor;
     }
 
-    /** Saves user-pasted codes locally so Auto Add Codes works even if the server is unavailable. */
+    public synchronized boolean isApiCodesDone() {
+        return apiCodesDone;
+    }
+
+    /** Saves user-pasted codes at the very front so they are tried right away. */
     public int addLocalCodes(List<String> keys, List<String> addedOut, List<String> duplicateOut) {
         if (keys == null || keys.isEmpty()) return 0;
         int added = 0;
         synchronized (this) {
-            if (codeKeys == null) {
-                codeKeys = new HashSet<>(allCodes.size() * 2 + keys.size());
-                for (String c : allCodes) codeKeys.add(c.toUpperCase(Locale.US));
-            }
+            ensureCodeKeysLocked(keys.size());
+            List<String> toPrepend = new ArrayList<>();
             for (String raw : keys) {
                 if (raw == null) continue;
                 String c = raw.trim();
                 if (c.length() != 11 || !c.regionMatches(true, 0, "NG-", 0, 3)) continue;
                 c = "NG-" + c.substring(3);
                 if (codeKeys.add(c.toUpperCase(Locale.US))) {
-                    allCodes.add(c);
+                    toPrepend.add(c);
                     added++;
                     if (addedOut != null) addedOut.add(c);
                 } else {
                     if (duplicateOut != null) duplicateOut.add(c);
                 }
             }
-            if (added > 0) {
+            if (!toPrepend.isEmpty()) {
+                allCodes.addAll(0, toPrepend);
+                scanHint = 0;
                 remainingCache = -1;
                 saveCodes();
                 saveState();
@@ -325,42 +348,155 @@ public class KeyRepository {
         return added;
     }
 
-    /** Adds a downloaded page (new keys only, letter case ignored) and saves it with the new cursor. */
-    int appendCodes(List<String> page, long cursor) {
-        int added;
+    /**
+     * Prepends a page returned by /api/app/codes (which arrives oldest-to-newest within the page).
+     * Reversing the page and inserting at index 0 places the most recent server codes first.
+     */
+    int prependApiPage(List<String> pageOldestToNewest, long cursor, boolean done) {
+        int added = 0;
+        boolean stateChanged = false;
         synchronized (this) {
-            added = appendCodesLocked(page, cursor);
+            List<String> page = pageOldestToNewest != null ? pageOldestToNewest : Collections.emptyList();
+            ensureCodeKeysLocked(page.size());
+            List<String> toPrepend = new ArrayList<>();
+            for (int i = page.size() - 1; i >= 0; i--) {
+                String raw = page.get(i);
+                if (raw == null) continue;
+                String c = raw.trim();
+                if (c.length() <= 3 || !c.regionMatches(true, 0, "NG-", 0, 3)) continue;
+                c = "NG-" + c.substring(3);
+                if (codeKeys.add(c.toUpperCase(Locale.US))) {
+                    toPrepend.add(c);
+                    added++;
+                }
+            }
+            if (!toPrepend.isEmpty()) {
+                allCodes.addAll(0, toPrepend);
+                scanHint = 0;
+                remainingCache = -1;
+                saveCodes();
+                stateChanged = true;
+            }
+            long prevCursor = codesCursor;
+            codesCursor = Math.max(codesCursor, cursor);
+            boolean prevDone = apiCodesDone;
+            if (done) apiCodesDone = true;
+            if (codesCursor != prevCursor || apiCodesDone != prevDone) {
+                stateChanged = true;
+            }
+            if (stateChanged) {
+                saveState();
+            }
         }
         if (added > 0) notifyListeners();
         return added;
     }
 
-    private int appendCodesLocked(List<String> page, long cursor) {
-        if (codeKeys == null) { // built once, kept in step with allCodes afterwards
-            codeKeys = new HashSet<>(allCodes.size() * 2 + page.size());
-            for (String c : allCodes) codeKeys.add(c.toUpperCase(Locale.US));
-        }
-        int added = 0;
-        for (String raw : page) {
-            if (raw == null) continue;
-            String c = raw.trim();
-            if (c.length() <= 3 || !c.regionMatches(true, 0, "NG-", 0, 3)) continue;
-            c = "NG-" + c.substring(3);
-            if (codeKeys.add(c.toUpperCase(Locale.US))) {
-                allCodes.add(c);
-                added++;
+    /**
+     * Applies codes fetched newest-first from Firestore (`nusuk_codes`, createdAt DESC).
+     * Pinned codes go into `firestorePinned`; new codes are prepended at index 0.
+     * If `forcePromote` is true, existing entries matching `newestFirst` are moved to index 0..k
+     * so the most recently uploaded data-page codes are always tried before older bulk codes.
+     */
+    void applyFirestoreCodes(List<String> newestFirst, List<String> pinned, boolean forcePromote) {
+        boolean notify = false;
+        synchronized (this) {
+            boolean stateChanged = false;
+            boolean codesChanged = false;
+
+            List<String> cleanPinned = new ArrayList<>();
+            if (pinned != null) {
+                for (String p : pinned) {
+                    if (p == null) continue;
+                    String c = p.trim();
+                    if (c.length() > 3 && c.regionMatches(true, 0, "NG-", 0, 3)) {
+                        cleanPinned.add("NG-" + c.substring(3));
+                    }
+                }
+            }
+            if (!cleanPinned.equals(firestorePinned)) {
+                firestorePinned.clear();
+                firestorePinned.addAll(cleanPinned);
+                stateChanged = true;
+                notify = true;
+            }
+
+            List<String> normalized = new ArrayList<>();
+            Set<String> normUpper = new LinkedHashSet<>();
+            if (newestFirst != null) {
+                for (String raw : newestFirst) {
+                    if (raw == null) continue;
+                    String c = raw.trim();
+                    if (c.length() <= 3 || !c.regionMatches(true, 0, "NG-", 0, 3)) continue;
+                    c = "NG-" + c.substring(3);
+                    if (normUpper.add(c.toUpperCase(Locale.US))) {
+                        normalized.add(c);
+                    }
+                }
+            }
+
+            if (!normalized.isEmpty()) {
+                ensureCodeKeysLocked(normalized.size());
+                if (forcePromote) {
+                    boolean alreadyAtFront = allCodes.size() >= normalized.size();
+                    if (alreadyAtFront) {
+                        for (int i = 0; i < normalized.size(); i++) {
+                            if (!allCodes.get(i).equalsIgnoreCase(normalized.get(i))) {
+                                alreadyAtFront = false;
+                                break;
+                            }
+                        }
+                    }
+                    if (!alreadyAtFront) {
+                        List<String> merged = new ArrayList<>(normalized.size() + allCodes.size());
+                        merged.addAll(normalized);
+                        for (String existing : allCodes) {
+                            if (!normUpper.contains(existing.toUpperCase(Locale.US))) {
+                                merged.add(existing);
+                            }
+                        }
+                        allCodes.clear();
+                        allCodes.addAll(merged);
+                        codeKeys.addAll(normUpper);
+                        codesChanged = true;
+                    }
+                } else {
+                    List<String> toPrepend = new ArrayList<>();
+                    for (String c : normalized) {
+                        if (codeKeys.add(c.toUpperCase(Locale.US))) {
+                            toPrepend.add(c);
+                        }
+                    }
+                    if (!toPrepend.isEmpty()) {
+                        allCodes.addAll(0, toPrepend);
+                        codesChanged = true;
+                    }
+                }
+            }
+
+            if (codesChanged) {
+                scanHint = 0;
+                remainingCache = -1;
+                saveCodes();
+                notify = true;
+            }
+            if (stateChanged || codesChanged) {
+                saveState();
             }
         }
-        long prevCursor = codesCursor;
-        codesCursor = Math.max(codesCursor, cursor);
-        if (added > 0) {
-            remainingCache = -1;
-            saveCodes();
-            saveState();
-        } else if (codesCursor != prevCursor) {
-            saveState();
+        if (notify) notifyListeners();
+    }
+
+    private void ensureCodeKeysLocked(int extraCapacity) {
+        if (codeKeys == null) {
+            codeKeys = new HashSet<>(allCodes.size() * 2 + extraCapacity);
+            for (String c : allCodes) codeKeys.add(c.toUpperCase(Locale.US));
         }
-        return added;
+    }
+
+    /** Legacy helper kept for compatibility: delegates to newest-first prepend. */
+    int appendCodes(List<String> page, long cursor) {
+        return prependApiPage(page, cursor, false);
     }
 
     // ---- persistence ----
@@ -372,23 +508,49 @@ public class KeyRepository {
     private static final long SAVE_DEBOUNCE_MS = 500;
     private final ScheduledExecutorService io = Executors.newSingleThreadScheduledExecutor();
     private boolean savePending = false; // a write is queued and hasn't read the data yet
+    private ScheduledFuture<?> saveFuture = null;
 
     /** Schedules a progress save; many results within SAVE_DEBOUNCE_MS become one write. */
     private synchronized void saveState() {
         if (savePending) return; // the queued write will read the latest data
         savePending = true;
-        io.schedule(this::writeState, SAVE_DEBOUNCE_MS, TimeUnit.MILLISECONDS);
+        saveFuture = io.schedule(this::writeState, SAVE_DEBOUNCE_MS, TimeUnit.MILLISECONDS);
+    }
+
+    /** Ensures any debounced state write hits disk promptly (e.g., when stopping automation). */
+    public void flushState() {
+        if (!loaded) return;
+        boolean pending;
+        synchronized (this) {
+            pending = savePending;
+            if (pending && saveFuture != null) {
+                saveFuture.cancel(false);
+                saveFuture = null;
+            }
+        }
+        if (pending) {
+            try {
+                io.submit(this::writeState).get(2, TimeUnit.SECONDS);
+            } catch (Exception ignored) {
+                writeState();
+            }
+        }
     }
 
     private void writeState() {
         // Copy under the lock (fast), build the JSON outside it: the UI thread reads the counters
-        // under the same lock, and ~20k codes of JSON used to hold it for a visible stall.
+        // under the same lock, and ~135k codes of JSON used to hold it for a visible stall.
         final long cursor, dSince;
-        final boolean rest;
-        final List<String> succ, inv, pSucc, pInv, already, pAlready, dead, prio, rechecked;
+        final boolean rest, apiDone;
+        final int orderVer;
+        final String fsInvalidSince;
+        final List<String> succ, inv, pSucc, pInv, already, pAlready, dead, prio, fsPinned, gInv, pFsInv;
         synchronized (this) {
             savePending = false; // changes from here on schedule another write
+            saveFuture = null;
             cursor = codesCursor; dSince = deadSince; rest = restored;
+            apiDone = apiCodesDone; orderVer = codesOrderVersion;
+            fsInvalidSince = firestoreInvalidSince;
             succ = new ArrayList<>(successCodes);
             inv = new ArrayList<>(invalidCodes);
             pSucc = new ArrayList<>(pendingSuccess);
@@ -397,12 +559,16 @@ public class KeyRepository {
             pAlready = new ArrayList<>(pendingAlready);
             dead = new ArrayList<>(deadCodes);
             prio = new ArrayList<>(serverPriority);
-            rechecked = new ArrayList<>(priorityRechecked);
+            fsPinned = new ArrayList<>(firestorePinned);
+            gInv = new ArrayList<>(globalInvalidCodes);
+            pFsInv = new ArrayList<>(pendingFirestoreInvalid);
         }
         String data;
         try {
             JSONObject json = new JSONObject();
             json.put("codesCursor", cursor);
+            json.put("apiCodesDone", apiDone);
+            json.put("codesOrderVersion", orderVer);
             json.put("success", new JSONArray(succ));
             json.put("invalid", new JSONArray(inv));
             json.put("pendingSuccess", new JSONArray(pSucc));
@@ -411,9 +577,12 @@ public class KeyRepository {
             json.put("pendingAlready", new JSONArray(pAlready));
             json.put("dead", new JSONArray(dead));
             json.put("deadSince", dSince);
+            json.put("globalInvalid", new JSONArray(gInv));
+            json.put("pendingFirestoreInvalid", new JSONArray(pFsInv));
+            json.put("firestoreInvalidSince", fsInvalidSince);
             json.put("serverPriority", new JSONArray(prio));
+            json.put("firestorePinned", new JSONArray(fsPinned));
             json.put("restored", rest);
-            json.put("priorityRechecked", new JSONArray(rechecked));
             data = json.toString();
         } catch (Exception e) {
             Log.e(TAG, "Error building state", e);
@@ -457,10 +626,14 @@ public class KeyRepository {
 
     private void loadState() {
         String raw = readAtomic(STATE_FILE);
+        boolean hadLegacyOrder = false;
         if (raw != null) try {
             JSONObject json = new JSONObject(raw);
 
             codesCursor = json.optLong("codesCursor", 0);
+            apiCodesDone = json.optBoolean("apiCodesDone", false);
+            codesOrderVersion = json.optInt("codesOrderVersion", 1);
+            if (codesOrderVersion < CODES_ORDER_VERSION) hadLegacyOrder = true;
 
             readIntoUpper(json.optJSONArray("success"), successCodes);
             readIntoUpper(json.optJSONArray("invalid"), invalidCodes);
@@ -470,9 +643,12 @@ public class KeyRepository {
             readIntoUpper(json.optJSONArray("pendingAlready"), pendingAlready);
             readIntoUpper(json.optJSONArray("dead"), deadCodes);
             deadSince = json.optLong("deadSince", 0);
+            readIntoUpper(json.optJSONArray("globalInvalid"), globalInvalidCodes);
+            readIntoUpper(json.optJSONArray("pendingFirestoreInvalid"), pendingFirestoreInvalid);
+            firestoreInvalidSince = json.optString("firestoreInvalidSince", "").trim();
             readIntoTrimmed(json.optJSONArray("serverPriority"), serverPriority);
+            readIntoTrimmed(json.optJSONArray("firestorePinned"), firestorePinned);
             restored = json.optBoolean("restored", false);
-            readIntoUpper(json.optJSONArray("priorityRechecked"), priorityRechecked);
 
             // Older versions kept the code list inside the state file: migrate it once.
             JSONArray legacy = json.optJSONArray("codes");
@@ -482,6 +658,11 @@ public class KeyRepository {
                     String s = legacy.optString(i, "").trim();
                     if (!s.isEmpty() && !"null".equalsIgnoreCase(s)) allCodes.add(s);
                 }
+                if (hadLegacyOrder && !allCodes.isEmpty()) {
+                    Collections.reverse(allCodes);
+                }
+                codesOrderVersion = CODES_ORDER_VERSION;
+                hadLegacyOrder = false;
                 saveCodes();
                 saveState(); // rewrites the state file without the big list
             }
@@ -499,6 +680,15 @@ public class KeyRepository {
             }
         } catch (Exception e) {
             Log.e(TAG, "Error loading codes", e);
+        }
+
+        if (hadLegacyOrder || codesOrderVersion < CODES_ORDER_VERSION) {
+            if (!allCodes.isEmpty()) {
+                Collections.reverse(allCodes);
+                saveCodes();
+            }
+            codesOrderVersion = CODES_ORDER_VERSION;
+            saveState();
         }
     }
 
@@ -549,6 +739,55 @@ public class KeyRepository {
         saveState();
     }
 
+    synchronized List<String> nextPendingFirestoreInvalid(int max) {
+        List<String> out = new ArrayList<>();
+        for (String c : pendingFirestoreInvalid) {
+            if (out.size() >= max) break;
+            out.add(c);
+        }
+        return out;
+    }
+
+    synchronized void onFirestoreInvalidUploaded(List<String> sent) {
+        if (sent == null || sent.isEmpty()) return;
+        pendingFirestoreInvalid.removeAll(sent);
+        saveState();
+    }
+
+    synchronized String firestoreInvalidSince() {
+        return firestoreInvalidSince;
+    }
+
+    void onFirestoreInvalidFetched(List<String> codes, String newSince) {
+        boolean changed = false;
+        synchronized (this) {
+            boolean stateChanged = false;
+            if (codes != null) {
+                for (String c : codes) {
+                    if (c == null) continue;
+                    String u = c.trim().toUpperCase(Locale.US);
+                    if (!u.isEmpty() && globalInvalidCodes.add(u)) {
+                        changed = true;
+                        stateChanged = true;
+                    }
+                }
+            }
+            if (newSince != null && !newSince.isEmpty()
+                    && (firestoreInvalidSince.isEmpty() || newSince.compareTo(firestoreInvalidSince) > 0)) {
+                firestoreInvalidSince = newSince;
+                stateChanged = true;
+            }
+            if (changed) {
+                scanHint = 0;
+                remainingCache = -1;
+            }
+            if (stateChanged) {
+                saveState();
+            }
+        }
+        if (changed) notifyListeners();
+    }
+
     synchronized long deadSince() {
         return deadSince;
     }
@@ -571,6 +810,7 @@ public class KeyRepository {
             deadSince = Math.max(deadSince, cursor);
             if (!dead.isEmpty() || !alive.isEmpty()) {
                 Log.i(TAG, "Shared dead codes: +" + dead.size() + " -" + alive.size() + " = " + deadCodes.size());
+                scanHint = 0;
                 remainingCache = -1;
                 changed = true;
             }
@@ -619,11 +859,15 @@ public class KeyRepository {
         for (String c : serverInvalid) {
             if (c == null) continue;
             String u = c.trim().toUpperCase(Locale.US);
-            if (!u.isEmpty() && !successCodes.contains(u) && !alreadyCodes.contains(u)) invalidCodes.add(u);
+            if (!u.isEmpty() && !successCodes.contains(u) && !alreadyCodes.contains(u)) {
+                invalidCodes.add(u);
+                deadCodes.add(u);
+            }
         }
         restored = true;
         int added = successCodes.size() + invalidCodes.size() + alreadyCodes.size() - before;
         Log.i(TAG, "Server backup in sync" + (added > 0 ? ", restored " + added + " tested codes" : ""));
+        scanHint = 0;
         remainingCache = -1;
         saveState();
     }
