@@ -16,6 +16,10 @@ import com.nusuk.automator.R;
 
 /** The app's one JSON POST to the server API (device id header, fixed-length body). */
 public final class Http {
+    private static final String FALLBACK_API_BASE = "https://nusuk.minbars.net";
+    private static final long FALLBACK_TTL_MS = 30 * 60_000L;
+    private static volatile long useFallbackUntilMs = 0;
+
     private Http() {}
 
     public static final class Response {
@@ -32,9 +36,34 @@ public final class Http {
     public static Response postJson(Context ctx, String path, JSONObject payload, int connectMs, int readMs) throws Exception {
         byte[] bytes = payload.toString().getBytes(StandardCharsets.UTF_8);
         String deviceId = Access.deviceId(ctx);
-        String target = (path != null && (path.startsWith("https://") || path.startsWith("http://")))
-                ? path
-                : (ctx.getString(R.string.api_base) + path);
+        if (path != null && (path.startsWith("https://") || path.startsWith("http://"))) {
+            return executePost(path, bytes, deviceId, connectMs, readMs);
+        }
+
+        String primaryBase = ctx.getString(R.string.api_base);
+        if (System.currentTimeMillis() < useFallbackUntilMs && !FALLBACK_API_BASE.equals(primaryBase)) {
+            return executePost(FALLBACK_API_BASE + path, bytes, deviceId, connectMs, readMs);
+        }
+
+        try {
+            Response r = executePost(primaryBase + path, bytes, deviceId, connectMs, readMs);
+            if ((r.status == 404 || r.status >= 500) && !FALLBACK_API_BASE.equals(primaryBase)) {
+                Response fb = executePost(FALLBACK_API_BASE + path, bytes, deviceId, connectMs, readMs);
+                useFallbackUntilMs = System.currentTimeMillis() + FALLBACK_TTL_MS;
+                return fb;
+            }
+            return r;
+        } catch (Exception primaryErr) {
+            if (!FALLBACK_API_BASE.equals(primaryBase)) {
+                Response fb = executePost(FALLBACK_API_BASE + path, bytes, deviceId, connectMs, readMs);
+                useFallbackUntilMs = System.currentTimeMillis() + FALLBACK_TTL_MS;
+                return fb;
+            }
+            throw primaryErr;
+        }
+    }
+
+    private static Response executePost(String target, byte[] bytes, String deviceId, int connectMs, int readMs) throws Exception {
         URL url = new URL(target);
         for (int hop = 0; hop < 5; hop++) {
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();

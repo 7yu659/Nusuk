@@ -507,5 +507,7 @@ public final class L {
         x("1", "১");
         x("2", "২");
         x("3", "৩");
+        x("Couldn't download codes. Check your internet and try again.",
+                "কোড ডাউনলোড করা যায়নি। ইন্টারনেট চেক করে আবার চেষ্টা করো।");
     }
 }
